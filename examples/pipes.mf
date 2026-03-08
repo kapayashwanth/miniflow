@@ -1,0 +1,134 @@
+# ============================================================
+# MiniFlow Pipes & Pipelines Demo  --  examples/pipes.mf
+# Demonstrates |> pipe, . compose, >> bind operators
+# ============================================================
+
+print("=== PIPE OPERATOR |> ===")
+
+# Basic pipe: value |> function
+let result1 = 5 |> double
+print("5 |> double =", result1)
+
+# Chained pipes (pipeline)
+let result2 = [1,2,3,4,5,6,7,8,9,10]
+              |> filter(even)
+              |> map(lambda x: x * x)
+              |> sum
+print("sum of squares of evens [1..10] =", result2)
+
+# String pipeline
+let cleaned = "  HELLO WORLD  "
+              |> str.strip
+              |> str.lower
+              |> str.title
+print("String pipeline:", cleaned)
+
+# Pipeline with custom functions
+def add1(n) = n + 1
+def times2(n) = n * 2
+def stringify(n) = "Value: " ++ str(n)
+
+let pipeline = 3 |> add1 |> times2 |> add1 |> stringify
+print(pipeline)
+
+print("\n=== FUNCTION COMPOSITION . ===")
+
+# f . g  creates h(x) = f(g(x))
+let not_even = not . even
+let increment_then_double = times2 . add1
+let process_str = str.strip . str.upper
+
+print("not . even applied to 4:", not_even(4))
+print("not . even applied to 3:", not_even(3))
+print("(times2 . add1)(5) =", increment_then_double(5))
+print("str pipeline result:", process_str("  hello  "))
+
+# Compose a chain of 3 functions
+def square(n) = n * n
+let complex_fn = str . times2 . square . add1  # str(times2(square(add1(x))))
+print("complex_fn(3) =", complex_fn(3))  # str(times2(square(4))) = str(times2(16)) = str(32) = "32"
+
+print("\n=== BIND OPERATOR >> ===")
+
+# ma >> f  is  f(ma)  -- simplified monadic-style sequencing
+let bound = 5 >> add1 >> times2 >> stringify
+print("Bind result:", bound)
+
+# Real-world example: data processing pipeline
+let raw_data = [" alice ", " BOB ", "  charlie  ", " dave "]
+
+let clean_names = raw_data |> map(str.strip) |> map(str.title) |> sorted
+print("Cleaned names:", clean_names)
+
+print("\n=== ADVANCED PIPELINES ===")
+
+# Process a list of numbers
+let numbers = range(1, 21)  # 1 to 20
+
+# Find the sum of cubes of odd numbers less than 15
+def cube(n) = n * n * n
+let sum_odd_cubes = numbers
+                   |> filter(odd)
+                   |> filter(lambda x: x < 15)
+                   |> map(cube)
+                   |> sum
+print("Sum of cubes of odd nums < 15:", sum_odd_cubes)
+
+# Word frequency pipeline
+let text = "the quick brown fox jumps over the lazy dog the fox"
+let word_freq = text.split(" ")
+               |> sorted
+               |> group
+               |> map(lambda g: (head(g), length(g)))
+               |> sorted
+print("Word frequencies:", word_freq)
+
+# FizzBuzz with pipes
+def fizzbuzz(n):
+    if n % 15 == 0:
+        "FizzBuzz"
+    elif n % 3 == 0:
+        "Fizz"
+    elif n % 5 == 0:
+        "Buzz"
+    else:
+        str(n)
+
+let fb_result = range(1, 21) |> map(fizzbuzz)
+print("FizzBuzz:", fb_result)
+
+# Compose sorting with key function
+let words = ["banana", "apple", "cherry", "date", "elderberry"]
+let by_length = sortOn(len, words)
+let by_length_desc = sortOn(lambda w: -len(w), words)
+print("Sorted by length:", by_length)
+print("Sorted by length desc:", by_length_desc)
+
+# Using function composition in a pipeline
+let normalize = str.strip . str.lower
+let words2 = ["  Hello  ", "WORLD", "  foo  ", "BAR"]
+let normalized = words2 |> map(normalize) |> sorted
+print("Normalized:", normalized)
+
+print("\n=== INFINITE PIPELINES (lazy) ===")
+# Generate infinite sequence, take what we need
+let evens = iterate(lambda x: x + 2, 0)        # 0, 2, 4, 6, ...
+let squares = iterate(lambda x: x + 2*floor(sqrt(x)) + 1, 1)  # perfect squares
+
+print("First 10 even numbers:", take(10, evens))
+print("First 10 natural number squares:", take(10, map(lambda x: x*x, iterate(add1, 1))))
+
+# Collatz sequence as a pipeline
+def collatz_step(n):
+    if even(n):
+        n // 2
+    else:
+        3 * n + 1
+
+def collatz_seq(n):
+    let seq = iterate(collatz_step, n)
+    takeWhile(lambda x: x > 1, seq) ++ [1]
+
+print("Collatz(27) length:", len(collatz_seq(27)))
+
+print("\nAll pipe demos complete!")

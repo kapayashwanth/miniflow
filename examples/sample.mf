@@ -1,0 +1,232 @@
+# ============================================================
+# MiniFlow Sample Program  --  examples/sample.mf
+# Demonstrates all core language features
+# ============================================================
+
+# ------- 1. Variables and arithmetic -------
+let x = 10
+let y = 3.14
+let name = "MiniFlow"
+
+print("Hello from", name)
+print("x =", x, "y =", y)
+print("x + y =", x + y)
+print("x ** 2 =", x ** 2)
+print("x // 3 =", x // 3)
+print("x % 3 =", x % 3)
+
+# ------- 2. String operations -------
+let greeting = "  hello world  "
+print(greeting.strip())
+print(greeting.upper())
+print(greeting.title())
+let parts = "a,b,c,d".split(",")
+print(parts)
+print(",".join(parts))
+
+# ------- 3. Collections -------
+let nums = [1, 2, 3, 4, 5]
+let pairs = {"name": "Alice", "age": 30}
+let unique = {1, 2, 3, 2, 1}
+
+print("List:", nums)
+print("Dict:", pairs)
+print("Set:", unique)
+print("Len:", len(nums))
+
+# ------- 4. Functions -------
+def square(n):
+    n * n
+
+def add(a, b):
+    a + b
+
+def greet(name, greeting="Hello"):
+    f"Hello, {name}!"
+
+print(square(5))
+print(add(3, 4))
+print(greet("World"))
+
+# ------- 5. Lambda expressions -------
+let double = \x -> x * 2
+let triple = lambda x: x * 3
+let add5   = \x -> x + 5
+
+print(double(10))
+print(triple(7))
+print(add5(3))
+
+# ------- 6. Pipe operator  |>
+print("--- Pipe Operator ---")
+let result = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] |> filter(even) |> map(square) |> sum
+print("Sum of squares of even [1..10]:", result)
+
+# Multiple pipes
+let pipeline_result = "  hello world  " |> str.strip |> str.upper
+print(pipeline_result)
+
+# Pipe with user functions
+def increment(n):
+    n + 1
+
+let piped = 5 |> increment |> double |> str
+print("Piped:", piped)
+
+# ------- 7. Function composition  . -------
+print("--- Function Composition ---")
+let shout = str.upper . str.strip
+let process = double . increment . square
+
+print(process(3))   # double(increment(square(3))) = double(increment(9)) = double(10) = 20
+
+# ------- 8. Conditionals -------
+print("--- Conditionals ---")
+def classify(n):
+    if n < 0:
+        "negative"
+    elif n == 0:
+        "zero"
+    else:
+        "positive"
+
+print(classify(-5))
+print(classify(0))
+print(classify(7))
+
+# ------- 9. Pattern matching -------
+print("--- Pattern Matching ---")
+def describe(x):
+    match x:
+        case 0:
+            "zero"
+        case 1:
+            "one"
+        case n if n < 0:
+            "negative"
+        case _:
+            "large"
+
+print(describe(0))
+print(describe(1))
+print(describe(-3))
+print(describe(100))
+
+# ------- 10. List comprehensions -------
+print("--- List Comprehensions ---")
+let squares   = [x*x for x in range(1, 11)]
+let evensq    = [x*x for x in range(1, 11) if even(x)]
+let pairs_lc  = [(x, y) for x in range(1, 4) for y in range(1, 4) if x != y]
+
+print("Squares:", squares)
+print("Even squares:", evensq)
+print("Pairs:", pairs_lc)
+
+# ------- 11. Recursion -------
+print("--- Recursion ---")
+def factorial(n):
+    if n <= 1:
+        1
+    else:
+        n * factorial(n - 1)
+
+def fibonacci(n):
+    match n:
+        case 0: 0
+        case 1: 1
+        case _: fibonacci(n-1) + fibonacci(n-2)
+
+print("10! =", factorial(10))
+print("fib(10) =", fibonacci(10))
+
+# ------- 12. Haskell-style higher-order functions -------
+print("--- Haskell-style Functions ---")
+let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+print("foldr (+) 0:", foldr(add, 0, xs))
+print("foldl (*) 1:", foldl(lambda a, x: a * x, 1, xs))
+print("scanl (+) 0:", scanl(add, 0, xs))
+print("takeWhile < 5:", takeWhile(lambda x: x < 5, xs))
+print("dropWhile < 5:", dropWhile(lambda x: x < 5, xs))
+print("span < 5:", span(lambda x: x < 5, xs))
+print("zip [1..5] [a..e]:", zip([1,2,3,4,5], ["a","b","c","d","e"]))
+print("zipWith (+):", zipWith(add, [1,2,3], [10,20,30]))
+print("nub:", nub([1,2,1,3,2,4,3,5]))
+print("group:", group([1,1,2,2,2,3,1]))
+print("sortOn:", sortOn(lambda x: -x, [3,1,4,1,5,9,2,6]))
+print("intercalate:", intercalate(", ", ["hello", "world", "foo"]))
+print("transpose:", transpose([[1,2,3],[4,5,6],[7,8,9]]))
+
+# ------- 13. Python-style functions -------
+print("--- Python-style Functions ---")
+let data = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]
+print("sorted:", sorted(data))
+print("sorted desc:", sorted(data, reverse=True))
+print("min:", min(data))
+print("max:", max(data))
+print("sum:", sum(data))
+print("any odd:", any(odd, data))
+print("all pos:", all(lambda x: x > 0, data))
+print("enumerate:", list(enumerate(["a","b","c"])))
+print("zip:", list(zip([1,2,3], ["a","b","c"])))
+
+# ------- 14. Records -------
+print("--- Records ---")
+record Point { x: Float, y: Float }
+record Person { name: String, age: Int }
+
+let p = Point { x: 3.0, y: 4.0 }
+let alice = Person { name: "Alice", age: 30 }
+
+print("Point:", p.x, p.y)
+print("Person:", alice.name, "age", alice.age)
+
+def distance(p):
+    sqrt(p.x ** 2 + p.y ** 2)
+
+print("Distance:", distance(p))
+
+# ------- 15. Error handling -------
+print("--- Error Handling ---")
+try:
+    let z = 10 / 0
+except ZeroDivisionError as e:
+    print("Caught:", e)
+
+try:
+    let idx = [1,2,3][10]
+except IndexError as e:
+    print("Caught index error:", e)
+
+# ------- 16. String formatting -------
+print("--- String Formatting ---")
+let pi_val = 3.14159
+print(f"Pi is approximately {pi_val}")
+print(format("Hello, {}! You are {} years old.", "Alice", 30))
+
+# ------- 17. Infinite lists (Haskell lazy) -------
+print("--- Lazy/Infinite Lists ---")
+let naturals = iterate(increment, 0)
+let powers2  = iterate(lambda x: x * 2, 1)
+let fibs     = iterate(lambda p: (p[1], p[0] + p[1]), (0, 1))
+
+print("First 10 naturals:", take(10, naturals))
+print("Powers of 2:", take(8, powers2))
+
+# ------- 18. Dictionary comprehension -------
+print("--- Dict Comprehension ---")
+let squared_map = {x: x*x for x in range(1, 6)}
+print("Squared map:", squared_map)
+
+# ------- 19. Math functions -------
+print("--- Math ---")
+print("sqrt(144):", sqrt(144))
+print("sin(pi/2):", sin(pi / 2))
+print("cos(0):", cos(0))
+print("log(e):", log(e))
+print("floor(3.7):", floor(3.7))
+print("ceil(3.2):", ceiling(3.2))
+print("gcd(48, 18):", gcd(48, 18))
+print("lcm(4, 6):", lcm(4, 6))
+
+print("\nAll done! MiniFlow is running correctly.")

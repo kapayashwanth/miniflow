@@ -1,0 +1,79 @@
+# ============================================================
+# MiniFlow Fibonacci  --  examples/fibonacci.mf
+# Multiple implementations showing different language features
+# ============================================================
+
+print("=== Fibonacci Implementations ===\n")
+
+# 1. Naive recursive
+def fib_naive(n):
+    match n:
+        case 0: 0
+        case 1: 1
+        case _: fib_naive(n-1) + fib_naive(n-2)
+
+print("Naive fib(10):", fib_naive(10))
+
+# 2. Tail-recursive with accumulator
+def fib_tail(n, a, b):
+    match n:
+        case 0: a
+        case _: fib_tail(n-1, b, a+b)
+
+def fib(n) = fib_tail(n, 0, 1)
+
+print("Tail-recursive fib(20):", fib(20))
+
+# 3. Iterative with loop
+def fib_loop(n):
+    let a = 0
+    let b = 1
+    for _ in range(n):
+        let temp = a + b
+        a = b
+        b = temp
+    a
+
+print("Loop fib(30):", fib_loop(30))
+
+# 4. Using infinite list + take (Haskell-style)
+let fib_list = iterate(lambda p: (p[1], p[0] + p[1]), (0, 1))
+let fibs = fib_list |> map(lambda p: p[0]) |> take(20)
+
+print("Infinite list fibs:", fibs)
+
+# 5. List comprehension version
+def fib_lc(n):
+    let result = foldl(lambda acc, _: acc ++ [acc[-1] + acc[-2]],
+                       [0, 1],
+                       range(n - 1))
+    result[n]
+
+print("fib_lc(15):", fib_lc(15))
+
+# 6. Memoization via dict
+let memo = {0: 0, 1: 1}
+def fib_memo(n):
+    if n in memo:
+        memo[n]
+    else:
+        let result = fib_memo(n-1) + fib_memo(n-2)
+        memo[n] = result
+        result
+
+print("Memoized fib(35):", fib_memo(35))
+
+# 7. Generator/stream approach
+def fib_stream():
+    let (a, b) = (0, 1)
+    iterate(lambda p: (p[1], p[0] + p[1]), (0, 1)) |> map(lambda p: p[0])
+
+let fib_str = fib_stream()
+print("Stream fib 1-10:", take(10, fib_str))
+
+# 8. Ratio-based (Golden ratio approximation)
+let phi = (1.0 + sqrt(5.0)) / 2.0
+def fib_approx(n) = round(phi ** n / sqrt(5.0))
+print("Approx fib(10):", fib_approx(10))
+
+print("\nAll Fibonacci demos complete!")
