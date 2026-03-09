@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build & Test — GHC ${{ matrix.ghc }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:  [ ubuntu-latest, windows-latest, macos-latest ]
+        ghc: [ '9.4', '9.6' ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup GHC
+        uses: haskell-actions/setup@v2
+        with:
+          ghc-version: ${{ matrix.ghc }}
+
+      # ── Build ──────────────────────────────────────────────────────────────
+      - name: Compile
+        run: ghc -isrc -O Main.hs -o miniflow
+
+      # ── Integration tests ─────────────────────────────────────────────────
+      - name: Test — sample.mf
+        run: ./miniflow examples/sample.mf
+
+      - name: Test — pipes.mf
+        run: ./miniflow examples/pipes.mf
+
+      - name: Test — fibonacci.mf
+        run: ./miniflow examples/fibonacci.mf
+
+      - name: Test — test_pipe.mf
+        run: ./miniflow examples/test_pipe.mf
+
+      - name: Test — test_fib1.mf
+        run: ./miniflow examples/test_fib1.mf
+
+      - name: Test — test_fib2.mf
+        run: ./miniflow examples/test_fib2.mf
+
+      - name: Test — test_partial.mf
+        run: ./miniflow examples/test_partial.mf
+
+      - name: Test — test_let.mf
+        run: ./miniflow examples/test_let.mf
+
+      - name: Test — test_compose.mf
+        run: ./miniflow examples/test_compose.mf
+
+  lint:
+    name: HLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.6'
+      - name: Install HLint
+        run: cabal install hlint
+      - name: Run HLint
+        run: hlint src/

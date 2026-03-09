@@ -337,3 +337,5 @@ showPattern (PRecord n flds)    = n ++ " {" ++ intercalate ", " (map showField f
 showPattern (PAs inner name)    = showPattern inner ++ " as " ++ name
 showPattern (POr l r)           = showPattern l ++ " | " ++ showPattern r
 showPattern (PTyped p ty)       = showPattern p ++ ": " ++ prettyType ty
+showPattern (PIndex _ _)        = "<index-assign>"
+showPattern (PField _ f)        = "<field-assign:" ++ f ++ ">"

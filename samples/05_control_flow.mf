@@ -1,0 +1,65 @@
+# ============================================================
+# MiniFlow Sample 05 - Control Flow
+# Demonstrates if/elif/else, for loops, while loops
+# ============================================================
+
+# --- if / elif / else ---
+def classify(n):
+    if n < 0:
+        "negative"
+    elif n == 0:
+        "zero"
+    elif n < 10:
+        "small"
+    elif n < 100:
+        "medium"
+    else:
+        "large"
+
+for n in [-5, 0, 7, 42, 200]:
+    print(n, "->", classify(n))
+
+# --- for loop over a list ---
+let fruits = ["apple", "banana", "cherry", "date"]
+print("\nFruits:")
+for fruit in fruits:
+    print(" -", fruit)
+
+# --- for loop with range ---
+print("\nMultiplication table (3x):")
+for i in range(1, 6):
+    print(f"  3 x {i} = {3 * i}")
+
+# --- for loop with index (enumerate-style) ---
+print("\nIndexed list:")
+let colors = ["red", "green", "blue"]
+for i in range(len(colors)):
+    print(f"  [{i}] {colors[i]}")
+
+# --- while loop ---
+print("\nCollatz sequence from 6:")
+let n = 6
+while n != 1:
+    print(n, "->", end=" ")
+    if n % 2 == 0:
+        n = n // 2
+    else:
+        n = n * 3 + 1
+print(1, "(done)")
+
+# --- Nested loops (basic matrix) ---
+print("\n3x3 multiplication table:")
+for i in range(1, 4):
+    for j in range(1, 4):
+        print(i * j, end="\t")
+    print("")
+
+# --- Loop with accumulator ---
+def sum_evens(limit):
+    let total = 0
+    for i in range(limit + 1):
+        if i % 2 == 0:
+            total = total + i
+    total
+
+print("\nSum of evens up to 20:", sum_evens(20))

@@ -1,0 +1,12 @@
+def cube(n) = n * n * n
+let numbers = [1,2,3,4,5,6,7,8,9,10]
+let sum_odd_cubes = numbers
+                   |> filter(odd)
+                   |> filter(lambda x: x < 15)
+                   |> map(cube)
+                   |> sum
+print("Sum:", sum_odd_cubes)
+let text = "hello world foo hello"
+let word_freq = text.split(" ")
+               |> sorted
+print("Words:", word_freq)

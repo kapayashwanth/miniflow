@@ -1,0 +1,63 @@
+# ============================================================
+# MiniFlow Sample 03 - Functions
+# Demonstrates def, lambdas, default args, and recursion
+# ============================================================
+
+# --- Basic function definition ---
+def add(a, b):
+    a + b
+
+def square(n):
+    n * n
+
+print("add(3, 4)  =", add(3, 4))
+print("square(7)  =", square(7))
+
+# --- Default arguments ---
+def greet(name, prefix="Hello"):
+    f"{prefix}, {name}!"
+
+print(greet("Alice"))
+print(greet("Bob", "Hi"))
+
+# --- Single-line shorthand ---
+def cube(n) = n * n * n
+def negate(x) = -x
+
+print("cube(4)   =", cube(4))
+print("negate(9) =", negate(9))
+
+# --- Lambda expressions (two equivalent syntaxes) ---
+let double  = \x -> x * 2
+let triple  = lambda x: x * 3
+let add_ten = \x -> x + 10
+
+print("double(5)  =", double(5))
+print("triple(5)  =", triple(5))
+print("add_ten(5) =", add_ten(5))
+
+# --- Closures ---
+def make_adder(n):
+    \x -> x + n
+
+let add5  = make_adder(5)
+let add20 = make_adder(20)
+print("add5(3)   =", add5(3))
+print("add20(3)  =", add20(3))
+
+# --- Recursion ---
+def factorial(n):
+    if n <= 1:
+        1
+    else:
+        n * factorial(n - 1)
+
+print("factorial(5)  =", factorial(5))
+print("factorial(10) =", factorial(10))
+
+# --- Multiple return values via tuple ---
+def min_max(lst):
+    (min(lst), max(lst))
+
+let (lo, hi) = min_max([3, 1, 4, 1, 5, 9, 2, 6])
+print("min =", lo, "  max =", hi)

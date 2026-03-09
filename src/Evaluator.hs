@@ -18,14 +18,17 @@ import Data.IORef
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.List (intercalate, isPrefixOf, isSuffixOf, sort, nub)
-import Data.Char (toLower, toUpper, isDigit, isAlpha)
+import Data.Char (toLower, toUpper, isDigit, isAlpha, isSpace, isUpper, isLower)
+import Builtins.Core (valueToStr)
 import Control.Exception (throwIO, catch, try, SomeException, evaluate)
 import System.IO (hFlush, stdout)
 import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Bits ((.&.), (.|.), xor)
+import Control.Monad (when)
 
 -- Import builtins
-import Builtins.Python (pythonBuiltinList)
-import Builtins.Haskell (haskellBuiltinList)
+import Builtins.Python (pythonBuiltinList, setApplyCallback)
+import qualified Builtins.Haskell as H (haskellBuiltinList, setApplyCallback)
 
 -- =============================================================================
 -- GLOBAL ENVIRONMENT INITIALIZATION
@@ -37,7 +40,7 @@ initGlobalEnv = do
   -- Register Python builtins
   mapM_ (\(n, f) -> defineVar n (VBuiltin n f) env) pythonBuiltinList
   -- Register Haskell builtins
-  mapM_ (\(n, f) -> defineVar n (VBuiltin n f) env) haskellBuiltinList
+  mapM_ (\(n, f) -> defineVar n (VBuiltin n f) env) H.haskellBuiltinList
   -- Constants
   defineVar "pi"    (VFloat 3.141592653589793) env
   defineVar "e"     (VFloat 2.718281828459045) env
@@ -49,6 +52,10 @@ initGlobalEnv = do
   -- Register pipeline helpers
   defineVar "compose" composeBuiltin env
   defineVar "pipe"    pipeBuiltin    env
+  -- Initialize apply callbacks so builtins can call closures
+  let applyCb fn args = applyFunction fn args
+  setApplyCallback applyCb
+  H.setApplyCallback applyCb
   return env
 
 composeBuiltin :: Value
@@ -88,6 +95,33 @@ evalStmt env (SExpr e) = do
   return Nothing
 
 -- Variable assignment
+evalStmt env (SAssign (PVar name) expr) = do
+  val   <- evalExpr env expr
+  found <- assignVar name val env
+  if not found then defineVar name val env else return ()
+  return Nothing
+-- Indexed assignment: container[key] = val
+evalStmt env (SAssign (PIndex containerExpr keyExpr) rhs) = do
+  container <- evalExpr env containerExpr
+  key       <- evalExpr env keyExpr
+  val       <- evalExpr env rhs
+  case container of
+    VDict ref -> modifyIORef ref (Map.insert key val)
+    VList ref -> case key of
+      VInt i -> modifyIORef ref (\xs ->
+        let j = if i < 0 then length xs + i else i
+        in take j xs ++ [val] ++ drop (j + 1) xs)
+      _ -> throwIO (MFTypeError "List index must be integer" noPos)
+    _ -> throwIO (MFTypeError "Object does not support item assignment" noPos)
+  return Nothing
+-- Field assignment: obj.field = val
+evalStmt env (SAssign (PField objExpr field) rhs) = do
+  obj <- evalExpr env objExpr
+  val <- evalExpr env rhs
+  case obj of
+    VDict ref -> modifyIORef ref (Map.insert (VStr field) val)
+    _ -> throwIO (MFTypeError "Object does not support field assignment" noPos)
+  return Nothing
 evalStmt env (SAssign pat expr) = do
   val <- evalExpr env expr
   ok  <- matchPattern env pat val
@@ -130,7 +164,7 @@ evalStmt env (SIf branches elsePart) = do
       Just stmts -> runBlock stmts
       Nothing    -> return Nothing
   where
-    runBlock stmts = evalStmts env stmts >>= \v ->
+    runBlock stmts = evalStmtsImplicit env stmts >>= \v ->
       return (if v == VNone then Nothing else Just v)
     evalBranches _ [] = return Nothing
     evalBranches e ((cond, stmts):rest) = do
@@ -205,7 +239,7 @@ evalStmt env (SMatch scrutinee arms) = do
     Nothing -> throwIO (MFPatternFail
       { mfMsg = "Non-exhaustive patterns in match"
       , mfPos = noPos })
-    Just v  -> return Nothing
+    Just v  -> return (Just v)
   where
     tryArms _ []     = return Nothing
     tryArms v (a:as) = do
@@ -220,8 +254,8 @@ evalStmt env (SMatch scrutinee arms) = do
             Just g  -> fmap isTruthy (evalExpr armEnv g)
           if guardOk
             then do
-              evalStmts armEnv body
-              return (Just VNone)
+              v' <- evalStmtsImplicit armEnv body
+              return (if v' == VNone then Nothing else Just v')
             else tryArms v as
 
 -- Try/Catch
@@ -385,44 +419,6 @@ evalExpr env (EFStr parts) = do
         Nothing -> return ("{" ++ rawExpr ++ "}")
     valueToStrIO v = displayValue v
 
-displayValue :: Value -> IO String
-displayValue VNone          = return "None"
-displayValue (VBool True)   = return "True"
-displayValue (VBool False)  = return "False"
-displayValue (VInt n)       = return (show n)
-displayValue (VFloat f)     = return (formatFlt f)
-displayValue (VStr s)       = return s
-displayValue (VList ref)    = do
-  vs <- readIORef ref
-  strs <- mapM reprVal vs
-  return ("[" ++ intercalate ", " strs ++ "]")
-displayValue (VTuple vs)    = do
-  strs <- mapM reprVal vs
-  return ("(" ++ intercalate ", " strs ++ ")")
-displayValue (VDict ref)    = do
-  m <- readIORef ref
-  pairs <- mapM (\(k,v) -> do ks <- reprVal k; vs <- reprVal v; return (ks ++ ": " ++ vs))
-                (Map.toAscList m)
-  return ("{" ++ intercalate ", " pairs ++ "}")
-displayValue (VSet ref)     = do
-  vs <- readIORef ref
-  strs <- mapM reprVal vs
-  return (case strs of { [] -> "set()"; _ -> "{" ++ intercalate ", " strs ++ "}" })
-displayValue v              = return (valueToStr v)
-
-reprVal :: Value -> IO String
-reprVal (VStr s) = return (show s)
-reprVal v        = displayValue v
-
-formatFlt :: Double -> String
-formatFlt f
-  | isInfinite f && f > 0 = "inf"
-  | isInfinite f && f < 0 = "-inf"
-  | isNaN f               = "nan"
-  | f == fromIntegral (round f :: Int) && abs f < 1e15
-                          = show (round f :: Int) ++ ".0"
-  | otherwise             = show f
-
 -- Variable lookup
 evalExpr env (EVar name) = lookupVarIO noPos name env
 
@@ -445,6 +441,13 @@ evalExpr env (EField expr field) = do
     VStr s -> evalStringMethod s field
     VList ref -> evalListMethod ref field
     VDict ref -> evalDictMethod ref field
+    -- str.method -> returns a function that applies the string method
+    VBuiltin "str" _ -> return (VBuiltin ("str." ++ field)
+      (\args _ -> case args of
+        [VStr s] -> do
+          methodFn <- evalStringMethod s field
+          applyFunction methodFn []
+        _        -> throwIO (MFTypeError { mfMsg = "str." ++ field ++ " requires a string argument", mfPos = noPos })))
     _ -> throwIO (MFTypeError
       { mfMsg = "'" ++ typeNameOf obj ++ "' object has no attribute '" ++ field ++ "'"
       , mfPos = noPos })
@@ -455,35 +458,6 @@ evalExpr env (EIndex expr idx) = do
   key       <- evalExpr env idx
   evalIndex container key
 
-evalIndex :: Value -> Value -> IO Value
-evalIndex (VList ref) (VInt i) = do
-  elems <- readIORef ref
-  let n = length elems
-      j = if i < 0 then n + i else i
-  if j < 0 || j >= n
-    then throwIO (MFIndexError { mfMsg = "list index out of range", mfPos = noPos })
-    else return (elems !! j)
-evalIndex (VStr s) (VInt i) = do
-  let n = length s
-      j = if i < 0 then n + i else i
-  if j < 0 || j >= n
-    then throwIO (MFIndexError { mfMsg = "string index out of range", mfPos = noPos })
-    else return (VStr [s !! j])
-evalIndex (VDict ref) key = do
-  m <- readIORef ref
-  case Map.lookup key m of
-    Just v  -> return v
-    Nothing -> throwIO (MFKeyError { mfMsg = "key not found: " ++ valueToStr key, mfPos = noPos })
-evalIndex (VTuple vs) (VInt i) = do
-  let n = length vs
-      j = if i < 0 then n + i else i
-  if j < 0 || j >= n
-    then throwIO (MFIndexError { mfMsg = "tuple index out of range", mfPos = noPos })
-    else return (vs !! j)
-evalIndex v k = throwIO (MFTypeError
-  { mfMsg = "'" ++ typeNameOf v ++ "' object is not subscriptable with " ++ typeNameOf k
-  , mfPos = noPos })
-
 -- Slicing: expr[a:b:c]
 evalExpr env (ESlice expr mA mB mC) = do
   container <- evalExpr env expr
@@ -491,41 +465,6 @@ evalExpr env (ESlice expr mA mB mC) = do
   b <- mapM (evalExpr env) mB
   c <- mapM (evalExpr env) mC
   evalSlice container a b c
-
-evalSlice :: Value -> Maybe Value -> Maybe Value -> Maybe Value -> IO Value
-evalSlice (VList ref) mA mB mC = do
-  elems <- readIORef ref
-  let n     = length elems
-      step  = maybe 1 toInt mC
-      start = case mA of
-        Nothing -> if step > 0 then 0 else n-1
-        Just v  -> normalizeIdx (toInt v) n
-      end   = case mB of
-        Nothing -> if step > 0 then n else -1
-        Just v  -> normalizeIdx (toInt v) n
-      sliced = if step > 0
-               then [elems !! i | i <- [start, start+step .. end-1], i >= 0, i < n]
-               else [elems !! i | i <- [start, start+step .. end+1], i >= 0, i < n]
-  ref' <- newIORef sliced
-  return (VList ref')
-evalSlice (VStr s) mA mB mC = do
-  let n     = length s
-      step  = maybe 1 toInt mC
-      start = case mA of
-        Nothing -> if step > 0 then 0 else n-1
-        Just v  -> normalizeIdx (toInt v) n
-      end   = case mB of
-        Nothing -> if step > 0 then n else -1
-        Just v  -> normalizeIdx (toInt v) n
-      sliced = if step > 0
-               then [s !! i | i <- [start, start+step .. end-1], i >= 0, i < n]
-               else [s !! i | i <- [start, start+step .. end+1], i >= 0, i < n]
-  return (VStr sliced)
-evalSlice v _ _ _ = throwIO (MFTypeError
-  { mfMsg = "'" ++ typeNameOf v ++ "' object is not sliceable", mfPos = noPos })
-
-normalizeIdx :: Int -> Int -> Int
-normalizeIdx i n = if i < 0 then max 0 (n + i) else min n i
 
 -- Binary operations
 evalExpr env (EBinOp op lhs rhs) = do
@@ -542,129 +481,26 @@ evalExpr env (EBinOp op lhs rhs) = do
       rv <- evalExpr env rhs
       evalBinOp op lv rv
 
-evalBinOp :: BinOp -> Value -> Value -> IO Value
-
--- Arithmetic
-evalBinOp OpAdd (VInt a)   (VInt b)   = return (VInt   (a + b))
-evalBinOp OpAdd (VFloat a) (VFloat b) = return (VFloat (a + b))
-evalBinOp OpAdd (VInt a)   (VFloat b) = return (VFloat (fromIntegral a + b))
-evalBinOp OpAdd (VFloat a) (VInt b)   = return (VFloat (a + fromIntegral b))
-evalBinOp OpAdd (VStr a)   (VStr b)   = return (VStr (a ++ b))
-evalBinOp OpAdd (VList r1) (VList r2) = do
-  l1 <- readIORef r1; l2 <- readIORef r2
-  ref <- newIORef (l1 ++ l2); return (VList ref)
-evalBinOp OpSub (VInt a)   (VInt b)   = return (VInt   (a - b))
-evalBinOp OpSub (VFloat a) (VFloat b) = return (VFloat (a - b))
-evalBinOp OpSub (VInt a)   (VFloat b) = return (VFloat (fromIntegral a - b))
-evalBinOp OpSub (VFloat a) (VInt b)   = return (VFloat (a - fromIntegral b))
-evalBinOp OpMul (VInt a)   (VInt b)   = return (VInt   (a * b))
-evalBinOp OpMul (VFloat a) (VFloat b) = return (VFloat (a * b))
-evalBinOp OpMul (VInt a)   (VFloat b) = return (VFloat (fromIntegral a * b))
-evalBinOp OpMul (VFloat a) (VInt b)   = return (VFloat (a * fromIntegral b))
-evalBinOp OpMul (VStr s)   (VInt n)   = return (VStr (concat (replicate n s)))
-evalBinOp OpMul (VInt n)   (VStr s)   = return (VStr (concat (replicate n s)))
-evalBinOp OpDiv (VInt a)   (VInt b)   = if b == 0 then throwIO (MFDivisionByZero noPos)
-                                        else return (VFloat (fromIntegral a / fromIntegral b))
-evalBinOp OpDiv (VFloat a) (VFloat b) = if b == 0 then throwIO (MFDivisionByZero noPos)
-                                        else return (VFloat (a / b))
-evalBinOp OpDiv (VInt a)   (VFloat b) = if b == 0 then throwIO (MFDivisionByZero noPos)
-                                        else return (VFloat (fromIntegral a / b))
-evalBinOp OpDiv (VFloat a) (VInt b)   = if b == 0 then throwIO (MFDivisionByZero noPos)
-                                        else return (VFloat (a / fromIntegral b))
-evalBinOp OpFloorDiv (VInt a) (VInt b) = if b == 0 then throwIO (MFDivisionByZero noPos)
-                                         else return (VInt (a `div` b))
-evalBinOp OpFloorDiv (VFloat a) (VFloat b) = if b == 0 then throwIO (MFDivisionByZero noPos)
-                                              else return (VFloat (fromIntegral (floor (a / b) :: Int)))
-evalBinOp OpMod  (VInt a)   (VInt b)   = if b == 0 then throwIO (MFDivisionByZero noPos)
-                                         else return (VInt (a `mod` b))
-evalBinOp OpMod  (VFloat a) (VFloat b) = return (VFloat (a - fromIntegral (floor (a/b) :: Int) * b))
-evalBinOp OpPow  (VInt a)   (VInt b)   = return (VInt   (a ^ b))
-evalBinOp OpPow  (VFloat a) (VFloat b) = return (VFloat (a ** b))
-evalBinOp OpPow  (VInt a)   (VFloat b) = return (VFloat (fromIntegral a ** b))
-evalBinOp OpPow  (VFloat a) (VInt b)   = return (VFloat (a ** fromIntegral b))
-
--- Comparisons
-evalBinOp OpEq  a b = return (VBool (a == b))
-evalBinOp OpNeq a b = return (VBool (a /= b))
-evalBinOp OpLt  a b = return (VBool (a < b))
-evalBinOp OpGt  a b = return (VBool (a > b))
-evalBinOp OpLtEq a b = return (VBool (a <= b))
-evalBinOp OpGtEq a b = return (VBool (a >= b))
-
--- Membership
-evalBinOp OpIn x (VList ref) = do
-  elems <- readIORef ref
-  return (VBool (x `elem` elems))
-evalBinOp OpIn (VStr c) (VStr s) = return (VBool (c `isInfixOf` s))
-  where isInfixOf sub str = any (isPrefixOf sub) (tails str)
-        tails []     = [[]]
-        tails xs@(_:rest) = xs : tails rest
-        isPrefixOf [] _ = True
-        isPrefixOf (x:xs) (y:ys) = x == y && isPrefixOf xs ys
-        isPrefixOf _ [] = False
-evalBinOp OpIn x (VDict ref) = do
-  m <- readIORef ref
-  return (VBool (Map.member x m))
-evalBinOp OpIn x (VSet ref) = do
-  elems <- readIORef ref
-  return (VBool (x `elem` elems))
-evalBinOp OpNotIn x container = do
-  VBool b <- evalBinOp OpIn x container
-  return (VBool (not b))
-
--- Bitwise
-evalBinOp OpBitAnd (VInt a) (VInt b) = return (VInt (a .&. b))
-  where (.&.) = (Prelude.&)
-evalBinOp OpBitOr  (VInt a) (VInt b) = return (VInt (a .|. b))
-  where (.|.) = (Prelude.|)
-evalBinOp OpBitXor (VInt a) (VInt b) = return (VInt (a `xor` b))
-  where xor x y = (x .|. y) - (x .&. y)
-evalBinOp OpShiftL (VInt a) (VInt b) = return (VInt (a * 2^b))
-evalBinOp OpShiftR (VInt a) (VInt b) = return (VInt (a `div` 2^b))
-
--- String concat (<>)
-evalBinOp OpConcat (VStr a) (VStr b) = return (VStr (a ++ b))
-evalBinOp OpConcat (VList r1) (VList r2) = do
-  l1 <- readIORef r1; l2 <- readIORef r2
-  ref <- newIORef (l1 ++ l2); return (VList ref)
-
--- Cons (:)
-evalBinOp OpCons x (VList ref) = do
-  elems <- readIORef ref
-  ref'  <- newIORef (x : elems)
-  return (VList ref')
-
--- Fallback
-evalBinOp op a b = throwIO (MFTypeError
-  { mfMsg = "unsupported operand types for " ++ show op ++
-            ": '" ++ typeNameOf a ++ "' and '" ++ typeNameOf b ++ "'"
-  , mfPos = noPos })
-
 -- Unary operations
 evalExpr env (EUnOp op expr) = do
   v <- evalExpr env expr
   evalUnOp op v
 
-evalUnOp :: UnOp -> Value -> IO Value
-evalUnOp OpNeg (VInt n)   = return (VInt   (negate n))
-evalUnOp OpNeg (VFloat f) = return (VFloat (negate f))
-evalUnOp OpNot v          = return (VBool (not (isTruthy v)))
-evalUnOp OpBitNot (VInt n) = return (VInt (complement n))
-  where complement x = -(x + 1)
-evalUnOp OpAbs (VInt n)   = return (VInt   (abs n))
-evalUnOp OpAbs (VFloat f) = return (VFloat (abs f))
-evalUnOp op v = throwIO (MFTypeError
-  { mfMsg = "unsupported operand type for unary op: '" ++ typeNameOf v ++ "'"
-  , mfPos = noPos })
-
 -- =============================================================================
 -- PIPE OPERATOR:  lhs |> rhs
--- Apply lhs as argument to rhs function
+-- If rhs is a function call f(args...), pipe lhs as an additional argument: f(args..., lhs)
+-- Otherwise, apply lhs as the sole argument to rhs
 -- =============================================================================
 evalExpr env (EPipe lhs rhs) = do
   lval <- evalExpr env lhs
-  fn   <- evalExpr env rhs
-  applyFunction fn [lval]
+  case rhs of
+    EApp fn args -> do
+      fnVal <- evalExpr env fn
+      (posArgs, kwArgs) <- evalArgs env args
+      applyFunctionKw fnVal (posArgs ++ [lval]) kwArgs
+    _ -> do
+      fn <- evalExpr env rhs
+      applyFunction fn [lval]
 
 -- =============================================================================
 -- COMPOSE OPERATOR: f . g
@@ -692,28 +528,6 @@ evalExpr env (EApp fn args) = do
   fnVal   <- evalExpr env fn
   (posArgs, kwArgs) <- evalArgs env args
   applyFunctionKw fnVal posArgs kwArgs
-
-evalArgs :: Env -> [Arg] -> IO ([Value], [(String, Value)])
-evalArgs env args = do
-  pos <- concat <$> mapM (evalPosArg env) [a | a@(ArgPos _) <- args]
-                                  -- simplified: handle all arg types
-  kw  <- mapM (evalKwArg env) [a | a@(ArgKw _ _) <- args]
-  stars <- concat <$> mapM (evalStarArg env) [a | a@(ArgStar _) <- args]
-  return (pos ++ stars, kw)
-
-evalPosArg :: Env -> Arg -> IO [Value]
-evalPosArg env (ArgPos e) = fmap (:[]) (evalExpr env e)
-evalPosArg _ _ = return []
-
-evalKwArg :: Env -> Arg -> IO (String, Value)
-evalKwArg env (ArgKw k v) = do val <- evalExpr env v; return (k, val)
-evalKwArg _ _ = return ("", VNone)
-
-evalStarArg :: Env -> Arg -> IO [Value]
-evalStarArg env (ArgStar e) = do
-  v <- evalExpr env e
-  valueToList v
-evalStarArg _ _ = return []
 
 -- Lambda expression
 evalExpr env (ELambda params body) = do
@@ -799,23 +613,6 @@ evalExpr env (EListComp body clauses) = do
   ref     <- newIORef results
   return (VList ref)
 
-runComprehension :: Env -> [CompClause] -> (Env -> IO Value) -> IO [Value]
-runComprehension env [] bodyFn = fmap (:[]) (bodyFn env)
-runComprehension env (CCFor pat iterE : rest) bodyFn = do
-  iterVal <- evalExpr env iterE
-  elems   <- valueToList iterVal
-  concat <$> mapM (\x -> do
-    loopEnv <- newChildEnv "<listcomp>" env
-    ok <- matchPattern loopEnv pat x
-    if ok
-      then runComprehension loopEnv rest bodyFn
-      else return []) elems
-runComprehension env (CCIf condE : rest) bodyFn = do
-  cv <- evalExpr env condE
-  if isTruthy cv
-    then runComprehension env rest bodyFn
-    else return []
-
 -- Dict comprehension: {k: v for ...}
 evalExpr env (EDictComp keyE valE clauses) = do
   pairs <- runComprehension2 env clauses (\e -> do
@@ -824,23 +621,6 @@ evalExpr env (EDictComp keyE valE clauses) = do
     return (k, v))
   ref <- newIORef (Map.fromList pairs)
   return (VDict ref)
-
-runComprehension2 :: Env -> [CompClause] -> (Env -> IO a) -> IO [a]
-runComprehension2 env [] bodyFn = fmap (:[]) (bodyFn env)
-runComprehension2 env (CCFor pat iterE : rest) bodyFn = do
-  iterVal <- evalExpr env iterE
-  elems   <- valueToList iterVal
-  concat <$> mapM (\x -> do
-    loopEnv <- newChildEnv "<dictcomp>" env
-    ok <- matchPattern loopEnv pat x
-    if ok
-      then runComprehension2 loopEnv rest bodyFn
-      else return []) elems
-runComprehension2 env (CCIf condE : rest) bodyFn = do
-  cv <- evalExpr env condE
-  if isTruthy cv
-    then runComprehension2 env rest bodyFn
-    else return []
 
 -- Set comprehension
 evalExpr env (ESetComp body clauses) = do
@@ -868,6 +648,236 @@ evalExpr env (ERecordUpdate expr updates) = do
 
 -- Type annotation (just evaluate the expression, ignore annotation at runtime)
 evalExpr env (EAnnotated e _) = evalExpr env e
+
+-- =============================================================================
+-- EXPRESSION HELPERS
+-- =============================================================================
+
+evalIndex :: Value -> Value -> IO Value
+evalIndex (VList ref) (VInt i) = do
+  elems <- readIORef ref
+  let n = length elems
+      j = if i < 0 then n + i else i
+  if j < 0 || j >= n
+    then throwIO (MFIndexError { mfMsg = "list index out of range", mfPos = noPos })
+    else return (elems !! j)
+evalIndex (VStr s) (VInt i) = do
+  let n = length s
+      j = if i < 0 then n + i else i
+  if j < 0 || j >= n
+    then throwIO (MFIndexError { mfMsg = "string index out of range", mfPos = noPos })
+    else return (VStr [s !! j])
+evalIndex (VDict ref) key = do
+  m <- readIORef ref
+  case Map.lookup key m of
+    Just v  -> return v
+    Nothing -> throwIO (MFKeyError { mfMsg = "key not found: " ++ valueToStr key, mfPos = noPos })
+evalIndex (VTuple vs) (VInt i) = do
+  let n = length vs
+      j = if i < 0 then n + i else i
+  if j < 0 || j >= n
+    then throwIO (MFIndexError { mfMsg = "tuple index out of range", mfPos = noPos })
+    else return (vs !! j)
+evalIndex v k = throwIO (MFTypeError
+  { mfMsg = "'" ++ typeNameOf v ++ "' object is not subscriptable with " ++ typeNameOf k
+  , mfPos = noPos })
+
+evalSlice :: Value -> Maybe Value -> Maybe Value -> Maybe Value -> IO Value
+evalSlice (VList ref) mA mB mC = do
+  elems <- readIORef ref
+  let n     = length elems
+      step  = maybe 1 toInt mC
+      start = case mA of
+        Nothing -> if step > 0 then 0 else n-1
+        Just v  -> normalizeIdx (toInt v) n
+      end   = case mB of
+        Nothing -> if step > 0 then n else -1
+        Just v  -> normalizeIdx (toInt v) n
+      sliced = if step > 0
+               then [elems !! i | i <- [start, start+step .. end-1], i >= 0, i < n]
+               else [elems !! i | i <- [start, start+step .. end+1], i >= 0, i < n]
+  ref' <- newIORef sliced
+  return (VList ref')
+evalSlice (VStr s) mA mB mC = do
+  let n     = length s
+      step  = maybe 1 toInt mC
+      start = case mA of
+        Nothing -> if step > 0 then 0 else n-1
+        Just v  -> normalizeIdx (toInt v) n
+      end   = case mB of
+        Nothing -> if step > 0 then n else -1
+        Just v  -> normalizeIdx (toInt v) n
+      sliced = if step > 0
+               then [s !! i | i <- [start, start+step .. end-1], i >= 0, i < n]
+               else [s !! i | i <- [start, start+step .. end+1], i >= 0, i < n]
+  return (VStr sliced)
+evalSlice v _ _ _ = throwIO (MFTypeError
+  { mfMsg = "'" ++ typeNameOf v ++ "' object is not sliceable", mfPos = noPos })
+
+normalizeIdx :: Int -> Int -> Int
+normalizeIdx i n = if i < 0 then max 0 (n + i) else min n i
+
+evalBinOp :: BinOp -> Value -> Value -> IO Value
+
+-- Arithmetic
+evalBinOp OpAdd (VInt a)   (VInt b)   = return (VInt   (a + b))
+evalBinOp OpAdd (VFloat a) (VFloat b) = return (VFloat (a + b))
+evalBinOp OpAdd (VInt a)   (VFloat b) = return (VFloat (fromIntegral a + b))
+evalBinOp OpAdd (VFloat a) (VInt b)   = return (VFloat (a + fromIntegral b))
+evalBinOp OpAdd (VStr a)   (VStr b)   = return (VStr (a ++ b))
+evalBinOp OpAdd (VList r1) (VList r2) = do
+  l1 <- readIORef r1; l2 <- readIORef r2
+  ref <- newIORef (l1 ++ l2); return (VList ref)
+evalBinOp OpSub (VInt a)   (VInt b)   = return (VInt   (a - b))
+evalBinOp OpSub (VFloat a) (VFloat b) = return (VFloat (a - b))
+evalBinOp OpSub (VInt a)   (VFloat b) = return (VFloat (fromIntegral a - b))
+evalBinOp OpSub (VFloat a) (VInt b)   = return (VFloat (a - fromIntegral b))
+evalBinOp OpMul (VInt a)   (VInt b)   = return (VInt   (a * b))
+evalBinOp OpMul (VFloat a) (VFloat b) = return (VFloat (a * b))
+evalBinOp OpMul (VInt a)   (VFloat b) = return (VFloat (fromIntegral a * b))
+evalBinOp OpMul (VFloat a) (VInt b)   = return (VFloat (a * fromIntegral b))
+evalBinOp OpMul (VStr s)   (VInt n)   = return (VStr (concat (replicate n s)))
+evalBinOp OpMul (VInt n)   (VStr s)   = return (VStr (concat (replicate n s)))
+evalBinOp OpDiv (VInt a)   (VInt b)   = if b == 0 then throwIO (MFDivisionByZero noPos)
+                                        else return (VFloat (fromIntegral a / fromIntegral b))
+evalBinOp OpDiv (VFloat a) (VFloat b) = if b == 0 then throwIO (MFDivisionByZero noPos)
+                                        else return (VFloat (a / b))
+evalBinOp OpDiv (VInt a)   (VFloat b) = if b == 0 then throwIO (MFDivisionByZero noPos)
+                                        else return (VFloat (fromIntegral a / b))
+evalBinOp OpDiv (VFloat a) (VInt b)   = if b == 0 then throwIO (MFDivisionByZero noPos)
+                                        else return (VFloat (a / fromIntegral b))
+evalBinOp OpFloorDiv (VInt a) (VInt b) = if b == 0 then throwIO (MFDivisionByZero noPos)
+                                         else return (VInt (a `div` b))
+evalBinOp OpFloorDiv (VFloat a) (VFloat b) = if b == 0 then throwIO (MFDivisionByZero noPos)
+                                              else return (VFloat (fromIntegral (floor (a / b) :: Int)))
+evalBinOp OpMod  (VInt a)   (VInt b)   = if b == 0 then throwIO (MFDivisionByZero noPos)
+                                         else return (VInt (a `mod` b))
+evalBinOp OpMod  (VFloat a) (VFloat b) = return (VFloat (a - fromIntegral (floor (a/b) :: Int) * b))
+evalBinOp OpPow  (VInt a)   (VInt b)   = return (VInt   (a ^ b))
+evalBinOp OpPow  (VFloat a) (VFloat b) = return (VFloat (a ** b))
+evalBinOp OpPow  (VInt a)   (VFloat b) = return (VFloat (fromIntegral a ** b))
+evalBinOp OpPow  (VFloat a) (VInt b)   = return (VFloat (a ** fromIntegral b))
+
+-- Comparisons
+evalBinOp OpEq  a b = return (VBool (a == b))
+evalBinOp OpNeq a b = return (VBool (a /= b))
+evalBinOp OpLt  a b = return (VBool (a < b))
+evalBinOp OpGt  a b = return (VBool (a > b))
+evalBinOp OpLtEq a b = return (VBool (a <= b))
+evalBinOp OpGtEq a b = return (VBool (a >= b))
+
+-- Membership
+evalBinOp OpIn x (VList ref) = do
+  elems <- readIORef ref
+  return (VBool (x `elem` elems))
+evalBinOp OpIn (VStr c) (VStr s) = return (VBool (c `isInfixOf` s))
+  where isInfixOf sub str = any (isPrefixOf sub) (tails str)
+        tails []     = [[]]
+        tails xs@(_:rest) = xs : tails rest
+        isPrefixOf [] _ = True
+        isPrefixOf (x:xs) (y:ys) = x == y && isPrefixOf xs ys
+        isPrefixOf _ [] = False
+evalBinOp OpIn x (VDict ref) = do
+  m <- readIORef ref
+  return (VBool (Map.member x m))
+evalBinOp OpIn x (VSet ref) = do
+  elems <- readIORef ref
+  return (VBool (x `elem` elems))
+evalBinOp OpNotIn x container = do
+  VBool b <- evalBinOp OpIn x container
+  return (VBool (not b))
+
+-- Bitwise
+evalBinOp OpBitAnd (VInt a) (VInt b) = return (VInt (a .&. b))
+evalBinOp OpBitOr  (VInt a) (VInt b) = return (VInt (a .|. b))
+evalBinOp OpBitXor (VInt a) (VInt b) = return (VInt (a `xor` b))
+evalBinOp OpShiftL (VInt a) (VInt b) = return (VInt (a * 2^b))
+evalBinOp OpShiftR (VInt a) (VInt b) = return (VInt (a `div` 2^b))
+
+-- String concat (<>)
+evalBinOp OpConcat (VStr a) (VStr b) = return (VStr (a ++ b))
+evalBinOp OpConcat (VList r1) (VList r2) = do
+  l1 <- readIORef r1; l2 <- readIORef r2
+  ref <- newIORef (l1 ++ l2); return (VList ref)
+
+-- Cons (:)
+evalBinOp OpCons x (VList ref) = do
+  elems <- readIORef ref
+  ref'  <- newIORef (x : elems)
+  return (VList ref')
+
+-- Fallback
+evalBinOp op a b = throwIO (MFTypeError
+  { mfMsg = "unsupported operand types for " ++ show op ++
+            ": '" ++ typeNameOf a ++ "' and '" ++ typeNameOf b ++ "'"
+  , mfPos = noPos })
+
+evalUnOp :: UnOp -> Value -> IO Value
+evalUnOp OpNeg (VInt n)   = return (VInt   (negate n))
+evalUnOp OpNeg (VFloat f) = return (VFloat (negate f))
+evalUnOp OpNot v          = return (VBool (not (isTruthy v)))
+evalUnOp OpBitNot (VInt n) = return (VInt (complement n))
+  where complement x = -(x + 1)
+evalUnOp OpAbs (VInt n)   = return (VInt   (abs n))
+evalUnOp OpAbs (VFloat f) = return (VFloat (abs f))
+evalUnOp op v = throwIO (MFTypeError
+  { mfMsg = "unsupported operand type for unary op: '" ++ typeNameOf v ++ "'"
+  , mfPos = noPos })
+
+evalArgs :: Env -> [Arg] -> IO ([Value], [(String, Value)])
+evalArgs env args = do
+  pos <- concat <$> mapM (evalPosArg env) [a | a@(ArgPos _) <- args]
+  kw  <- mapM (evalKwArg env) [a | a@(ArgKw _ _) <- args]
+  stars <- concat <$> mapM (evalStarArg env) [a | a@(ArgStar _) <- args]
+  return (pos ++ stars, kw)
+
+evalPosArg :: Env -> Arg -> IO [Value]
+evalPosArg env (ArgPos e) = fmap (:[]) (evalExpr env e)
+evalPosArg _ _ = return []
+
+evalKwArg :: Env -> Arg -> IO (String, Value)
+evalKwArg env (ArgKw k v) = do val <- evalExpr env v; return (k, val)
+evalKwArg _ _ = return ("", VNone)
+
+evalStarArg :: Env -> Arg -> IO [Value]
+evalStarArg env (ArgStar e) = do
+  v <- evalExpr env e
+  valueToList v
+evalStarArg _ _ = return []
+
+runComprehension :: Env -> [CompClause] -> (Env -> IO Value) -> IO [Value]
+runComprehension env [] bodyFn = fmap (:[]) (bodyFn env)
+runComprehension env (CCFor pat iterE : rest) bodyFn = do
+  iterVal <- evalExpr env iterE
+  elems   <- valueToList iterVal
+  concat <$> mapM (\x -> do
+    loopEnv <- newChildEnv "<listcomp>" env
+    ok <- matchPattern loopEnv pat x
+    if ok
+      then runComprehension loopEnv rest bodyFn
+      else return []) elems
+runComprehension env (CCIf condE : rest) bodyFn = do
+  cv <- evalExpr env condE
+  if isTruthy cv
+    then runComprehension env rest bodyFn
+    else return []
+
+runComprehension2 :: Env -> [CompClause] -> (Env -> IO a) -> IO [a]
+runComprehension2 env [] bodyFn = fmap (:[]) (bodyFn env)
+runComprehension2 env (CCFor pat iterE : rest) bodyFn = do
+  iterVal <- evalExpr env iterE
+  elems   <- valueToList iterVal
+  concat <$> mapM (\x -> do
+    loopEnv <- newChildEnv "<dictcomp>" env
+    ok <- matchPattern loopEnv pat x
+    if ok
+      then runComprehension2 loopEnv rest bodyFn
+      else return []) elems
+runComprehension2 env (CCIf condE : rest) bodyFn = do
+  cv <- evalExpr env condE
+  if isTruthy cv
+    then runComprehension2 env rest bodyFn
+    else return []
 
 -- =============================================================================
 -- FUNCTION APPLICATION
@@ -925,10 +935,20 @@ bindParams env params posArgs kwArgs = go params posArgs
 
 runFunctionBody :: Env -> [Stmt] -> IO Value
 runFunctionBody env stmts =
-  catch (evalStmts env stmts >> return VNone) handler
+  catch (evalStmtsImplicit env stmts) handler
   where
     handler (MFReturnSignal v) = return v
     handler ex = throwIO ex
+
+-- Like evalStmts, but returns the value of the last expression statement (implicit return)
+evalStmtsImplicit :: Env -> [Stmt] -> IO Value
+evalStmtsImplicit _   []     = return VNone
+evalStmtsImplicit env [SExpr e] = evalExpr env e  -- last stmt is expression: implicit return
+evalStmtsImplicit env (s:ss) = do
+  result <- evalStmt env s
+  case result of
+    Just v  -> return v
+    Nothing -> evalStmtsImplicit env ss
 
 -- =============================================================================
 -- VALUE TO LIST
@@ -959,11 +979,11 @@ valueToList v = throwIO (MFTypeError
 
 evalStringMethod :: String -> String -> IO Value
 evalStringMethod s method = case method of
-  "upper"      -> return (VStr (map toUpper s))
-  "lower"      -> return (VStr (map toLower s))
-  "strip"      -> return (VStr (trim s))
-  "lstrip"     -> return (VStr (dropWhile isSpace s))
-  "rstrip"     -> return (VStr (reverse (dropWhile isSpace (reverse s))))
+  "upper"      -> return (VBuiltin "upper" (\_ _ -> return (VStr (map toUpper s))))
+  "lower"      -> return (VBuiltin "lower" (\_ _ -> return (VStr (map toLower s))))
+  "strip"      -> return (VBuiltin "strip" (\_ _ -> return (VStr (trim s))))
+  "lstrip"     -> return (VBuiltin "lstrip" (\_ _ -> return (VStr (dropWhile isSpace s))))
+  "rstrip"     -> return (VBuiltin "rstrip" (\_ _ -> return (VStr (reverse (dropWhile isSpace (reverse s))))))
   "split"      -> return (VBuiltin "split" (\args _ -> do
                     let sep = case args of { [VStr sep] -> sep; _ -> " " }
                     ref <- newIORef (map VStr (splitOn sep s))
@@ -985,14 +1005,14 @@ evalStringMethod s method = case method of
   "format"     -> return (VBuiltin "format" (\args _ -> do
                     result <- applyFormat s args []
                     return (VStr result)))
-  "encode"     -> return (VStr s)
-  "decode"     -> return (VStr s)
-  "isalpha"    -> return (VBool (not (null s) && all isAlpha s))
-  "isdigit"    -> return (VBool (not (null s) && all isDigit s))
-  "isalnum"    -> return (VBool (not (null s) && all (\c -> isAlpha c || isDigit c) s))
-  "isspace"    -> return (VBool (not (null s) && all isSpace s))
-  "isupper"    -> return (VBool (not (null s) && all isUpper s))
-  "islower"    -> return (VBool (not (null s) && all isLower s))
+  "encode"     -> return (VBuiltin "encode" (\_ _ -> return (VStr s)))
+  "decode"     -> return (VBuiltin "decode" (\_ _ -> return (VStr s)))
+  "isalpha"    -> return (VBuiltin "isalpha" (\_ _ -> return (VBool (not (null s) && all isAlpha s))))
+  "isdigit"    -> return (VBuiltin "isdigit" (\_ _ -> return (VBool (not (null s) && all isDigit s))))
+  "isalnum"    -> return (VBuiltin "isalnum" (\_ _ -> return (VBool (not (null s) && all (\c -> isAlpha c || isDigit c) s))))
+  "isspace"    -> return (VBuiltin "isspace" (\_ _ -> return (VBool (not (null s) && all isSpace s))))
+  "isupper"    -> return (VBuiltin "isupper" (\_ _ -> return (VBool (not (null s) && all isUpper s))))
+  "islower"    -> return (VBuiltin "islower" (\_ _ -> return (VBool (not (null s) && all isLower s))))
   "center"     -> return (VBuiltin "center" (\[VInt n] _ -> do
                     let pad = max 0 (n - length s)
                         lp  = pad `div` 2
@@ -1004,9 +1024,9 @@ evalStringMethod s method = case method of
                     return (VStr (replicate (max 0 (n - length s)) ' ' ++ s))))
   "zfill"      -> return (VBuiltin "zfill" (\[VInt n] _ ->
                     return (VStr (replicate (max 0 (n - length s)) '0' ++ s))))
-  "title"      -> return (VStr (titleCase s))
-  "swapcase"   -> return (VStr (map swapCase s))
-  "expandtabs" -> return (VStr s)  -- simplified
+  "title"      -> return (VBuiltin "title" (\_ _ -> return (VStr (titleCase s))))
+  "swapcase"   -> return (VBuiltin "swapcase" (\_ _ -> return (VStr (map swapCase s))))
+  "expandtabs" -> return (VBuiltin "expandtabs" (\_ _ -> return (VStr s)))
   _            -> throwIO (MFKeyError
     { mfMsg = "str has no method '" ++ method ++ "'"
     , mfPos = noPos })
@@ -1132,9 +1152,6 @@ removeFirst :: Eq a => a -> [a] -> [a]
 removeFirst _ []     = []
 removeFirst x (y:ys) = if x == y then ys else y : removeFirst x ys
 
-modifyIORef :: IORef a -> (a -> a) -> IO ()
-modifyIORef ref f = readIORef ref >>= writeIORef ref . f
-
 elemIndex :: Eq a => a -> [a] -> Maybe Int
 elemIndex _ []     = Nothing
 elemIndex x (y:ys) = if x == y then Just 0 else fmap (+1) (elemIndex x ys)
@@ -1206,6 +1223,3 @@ evalDictMethod ref method = case method of
 -- HELPER: when
 -- =============================================================================
 
-when :: Bool -> IO () -> IO ()
-when True  action = action
-when False _      = return ()

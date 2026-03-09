@@ -1,0 +1,10 @@
+def square(n):
+    n * n
+
+let double = \x -> x * 2
+
+def increment(n):
+    n + 1
+
+let process = double . increment . square
+print(process(3))

@@ -5,12 +5,14 @@
 module Parser
   ( parseProgram
   , parseExpr
+  , parseExprTokens
   , ParseError(..)
   ) where
 
 import Types
 import Data.IORef
 import Control.Monad (when, unless, void)
+import Data.Char (isUpper)
 import Data.List (intercalate)
 import Data.Maybe (fromMaybe, isJust, catMaybes)
 
@@ -106,6 +108,32 @@ skipNewlines = do
     TNewline -> consume >> skipNewlines
     _        -> return ()
 
+-- Skip newlines, indents, and dedents (safe to use inside paren-delimited contexts)
+skipWhitespace :: Parser ()
+skipWhitespace = do
+  t <- peek
+  case t of
+    TNewline -> consume >> skipWhitespace
+    TIndent  -> consume >> skipWhitespace
+    TDedent  -> consume >> skipWhitespace
+    _        -> return ()
+
+-- Returns True if a TIndent was consumed (caller must consume matching TDedent)
+skipNewlineIndent :: Parser Bool
+skipNewlineIndent = Parser $ \st ->
+  case skipTowardPipe False (psTokens st) of
+    Just (ts', hadIndent) -> Right (hadIndent, st { psTokens = ts' })
+    Nothing               -> Right (False, st)
+
+skipTowardPipe :: Bool -> [TokenInfo] -> Maybe ([TokenInfo], Bool)
+skipTowardPipe hadIndent [] = Nothing
+skipTowardPipe hadIndent (ti:rest) = case tiToken ti of
+  TNewline   -> skipTowardPipe hadIndent rest
+  TIndent    -> skipTowardPipe True rest
+  TDedent    -> Nothing  -- end of block, stop
+  TPipeRight -> Just (ti:rest, hadIndent)
+  _          -> Nothing
+
 matchToken :: Token -> Parser Bool
 matchToken tok = do
   t <- peek
@@ -123,6 +151,13 @@ parseProgram toks =
   in case runParser parseStmts st of
     Left  e        -> Left e
     Right (ss, _)  -> Right (Program ss)
+
+parseExprTokens :: [TokenInfo] -> Either ParseError Expr
+parseExprTokens toks =
+  let st = ParserState{ psTokens = toks, psPos = noPos }
+  in case runParser parsePipeExpr st of
+    Left  e       -> Left e
+    Right (e, _)  -> Right e
 
 parseStmts :: Parser [Stmt]
 parseStmts = do
@@ -193,7 +228,10 @@ parseFunDef = do
   name   <- expectIdent
   params <- parseParamList
   retTy  <- optional parseReturnType
-  body   <- parseBlock
+  t      <- peek
+  body   <- case t of
+    TAssign -> consume >> parseExpr >>= \e -> return [SReturn (Just e)]
+    _       -> parseBlock
   return (SFunDef name params retTy body)
 
 parseReturnType :: Parser TypeExpr
@@ -204,11 +242,20 @@ parseReturnType = do
 parseLetDef :: Parser Stmt
 parseLetDef = do
   expect TLet
-  name  <- expectIdent
-  annot <- optional (expect TColon >> parseTypeExpr)
-  expect TAssign
-  expr  <- parseExpr
-  return (SLetDef name annot expr)
+  t <- peek
+  case t of
+    TLParen -> do
+      -- tuple destructuring: let (a, b) = expr
+      pat  <- parsePattern
+      expect TAssign
+      expr <- parseExpr
+      return (SAssign pat expr)
+    _ -> do
+      name  <- expectIdent
+      annot <- optional (expect TColon >> parseTypeExpr)
+      expect TAssign
+      expr  <- parseExpr
+      return (SLetDef name annot expr)
 
 parseIfStmt :: Parser Stmt
 parseIfStmt = do
@@ -221,6 +268,7 @@ parseIfStmt = do
 
 parseElifs :: Parser [(Expr, [Stmt])]
 parseElifs = do
+  skipNewlines
   t <- peek
   case t of
     TElif -> do
@@ -233,6 +281,7 @@ parseElifs = do
 
 parseElse :: Parser (Maybe [Stmt])
 parseElse = do
+  skipNewlines
   t <- peek
   case t of
     TElse -> do
@@ -283,11 +332,13 @@ parseMatchStmt = do
 
 parseMatchArms :: Parser [MatchArm]
 parseMatchArms = do
+  skipNewlines
   t <- peek
   case t of
     TDedent -> return []
     TCase -> do
       arm  <- parseMatchArm
+      skipNewlines
       rest <- parseMatchArms
       return (arm : rest)
     _ -> return []
@@ -311,6 +362,7 @@ parseTryCatch = do
 
 parseExceptClauses :: Parser [(Maybe String, String, [Stmt])]
 parseExceptClauses = do
+  skipNewlines
   t <- peek
   case t of
     TExcept -> do
@@ -328,6 +380,7 @@ parseExceptClauses = do
 
 parseFinallyClause :: Parser (Maybe [Stmt])
 parseFinallyClause = do
+  skipNewlines
   t <- peek
   case t of
     TIdent "finally" -> consume >> fmap Just parseBlock
@@ -467,10 +520,12 @@ exprName (EVar n) = n
 exprName _        = "__unknown__"
 
 exprToPattern :: Expr -> Maybe Pattern
-exprToPattern (EVar n)    = Just (PVar n)
-exprToPattern (ETuple es) = fmap PTuple (mapM exprToPattern es)
-exprToPattern (EList  es) = fmap PList  (mapM exprToPattern es)
-exprToPattern _           = Nothing
+exprToPattern (EVar n)      = Just (PVar n)
+exprToPattern (ETuple es)   = fmap PTuple (mapM exprToPattern es)
+exprToPattern (EList  es)   = fmap PList  (mapM exprToPattern es)
+exprToPattern (EIndex c k)  = Just (PIndex c k)
+exprToPattern (EField e f)  = Just (PField e f)
+exprToPattern _             = Nothing
 
 -- =============================================================================
 -- EXPRESSION PARSING  (operator precedence via recursive descent)
@@ -487,12 +542,32 @@ parsePipeExpr = do
 
 parsePipeRest :: Expr -> Parser Expr
 parsePipeRest lhs = do
+  hadIndent <- skipNewlineIndent
   t <- peek
   case t of
     TPipeRight -> do
       consume
       rhs <- parseLambdaExpr
-      parsePipeRest (EPipe lhs rhs)
+      result <- parsePipeRest (EPipe lhs rhs)
+      -- If we entered an indent context, consume the closing dedent
+      when hadIndent $ do
+        skipNewlines
+        t2 <- peek
+        case t2 of
+          TDedent -> consume >> return ()
+          _       -> return ()
+      return result
+    TBind -> do
+      consume
+      rhs <- parseLambdaExpr
+      result <- parsePipeRest (EBind lhs rhs)
+      when hadIndent $ do
+        skipNewlines
+        t2 <- peek
+        case t2 of
+          TDedent -> consume >> return ()
+          _       -> return ()
+      return result
     _ -> return lhs
 
 -- Lambda expression
@@ -503,7 +578,11 @@ parseLambdaExpr = do
     TLambda -> do
       consume
       params <- parseLambdaParams
-      expect TArrow  -- or TColon for Python style
+      t2 <- peek
+      case t2 of
+        TArrow -> do { _ <- consume; return () }
+        TColon -> do { _ <- consume; return () }
+        _      -> return ()
       body <- parseExpr
       return (ELambda params body)
     TBackslash -> do
@@ -521,7 +600,8 @@ parseLambdaParams = do
     TArrow -> return []
     TColon -> return []
     _ -> do
-      p    <- parseSingleParam
+      name <- expectIdent
+      let p = ParamSimple name
       t2   <- peek
       case t2 of
         TComma -> consume >> fmap (p :) parseLambdaParams
@@ -560,8 +640,15 @@ parseNotExpr = do
   case t of
     TNot -> do
       consume
-      e <- parseNotExpr
-      return (EUnOp OpNot e)
+      t2 <- peek
+      case t2 of
+        TDot -> do
+          -- 'not' used as first-class function before compose (e.g. not . even)
+          e <- parsePostfixRest (EVar "not")
+          parseCmpRest e
+        _ -> do
+          e <- parseNotExpr
+          return (EUnOp OpNot e)
     _ -> parseCmpExpr
 
 -- Comparison
@@ -702,15 +789,54 @@ parsePostfixRest e = do
       expect TRBracket
       parsePostfixRest (applyIndex e idx)
     TDot -> do
+      dotInfo <- peekInfo
       consume
-      t2 <- peek
-      case t2 of
-        TIdent field -> consume >> parsePostfixRest (EField e field)
+      t2Info <- peekInfo
+      let dotCol  = spCol (tiPos dotInfo)
+          nextCol = spCol (tiPos t2Info)
+          adjacent = nextCol == dotCol + 1
+      case tiToken t2Info of
+        TIdent field
+          | adjacent  -> consume >> parsePostfixRest (EField e field)
+          | otherwise -> do
+              -- composition operator f . g (space-separated)
+              rhs <- parsePostfixExpr
+              parsePostfixRest (ECompose e rhs)
         _            -> do
           -- composition operator f . g
-          rhs <- parsePrimaryExpr
+          rhs <- parsePostfixExpr
           parsePostfixRest (ECompose e rhs)
+    TLBrace
+      | isRecordName e -> do
+          consume
+          fields <- parseRecordFields
+          expect TRBrace
+          case e of
+            EVar name -> parsePostfixRest (ERecordCreate name fields)
+            _         -> parsePostfixRest e
     _ -> return e
+
+isRecordName :: Expr -> Bool
+isRecordName (EVar (c:_)) = isUpper c
+isRecordName _             = False
+
+parseRecordFields :: Parser [(String, Expr)]
+parseRecordFields = do
+  t <- peek
+  case t of
+    TRBrace -> return []
+    _ -> do
+      ti <- peekInfo
+      case tiToken ti of
+        TIdent fname -> do
+          consume
+          expect TColon
+          val <- parseExpr
+          t2 <- peek
+          case t2 of
+            TComma  -> consume >> fmap ((fname, val) :) parseRecordFields
+            _       -> return [(fname, val)]
+        _ -> return []
 
 applyIndex :: Expr -> Either Expr (Maybe Expr, Maybe Expr, Maybe Expr) -> Expr
 applyIndex e (Left  idx)      = EIndex e idx
@@ -933,14 +1059,14 @@ parseLambdaExprPrimary :: Parser Expr
 parseLambdaExprPrimary = do
   t <- peek
   case t of
-    TLambda  -> consume
-    TBackslash -> consume
-    _        -> return ()
+    TLambda    -> do { _ <- consume; return () }
+    TBackslash -> do { _ <- consume; return () }
+    _          -> return ()
   params <- parseLambdaParams
   t2 <- peek
   case t2 of
-    TArrow -> consume
-    TColon -> consume
+    TArrow -> do { _ <- consume; return () }
+    TColon -> do { _ <- consume; return () }
     _      -> return ()
   body <- parseExpr
   return (ELambda params body)
@@ -1016,7 +1142,12 @@ parseArgs = do
   arg <- parseSingleArg
   t   <- peek
   case t of
-    TComma -> consume >> fmap (arg :) parseArgs
+    TComma -> do
+      consume
+      t2 <- peek
+      case t2 of
+        TRParen -> return [arg]  -- trailing comma
+        _       -> fmap (arg :) parseArgs
     _      -> return [arg]
 
 parseSingleArg :: Parser Arg
@@ -1034,8 +1165,14 @@ parseSingleArg = do
         _       -> do
           -- Put it back by treating as expression
           e <- parsePostfixRest (EVar name)
-          e' <- parseAddRest e   -- continue parsing the expression
-          return (ArgPos e')
+          e' <- parseMulRest e
+          e'' <- parseAddRest e'
+          e''' <- parseShiftRest e''
+          e4 <- parseBitandRest e'''
+          e5 <- parseBitxorRest e4
+          e6 <- parseBitorRest e5
+          e7 <- parseCmpRest e6
+          return (ArgPos e7)
     _ -> fmap ArgPos parseExpr
 
 -- =============================================================================

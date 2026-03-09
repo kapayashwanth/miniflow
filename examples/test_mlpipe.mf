@@ -1,0 +1,5 @@
+let result2 = [1,2,3,4,5,6,7,8,9,10]
+              |> filter(even)
+              |> map(lambda x: x * x)
+              |> sum
+print(result2)

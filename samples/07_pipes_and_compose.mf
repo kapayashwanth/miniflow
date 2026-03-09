@@ -1,0 +1,59 @@
+# ============================================================
+# MiniFlow Sample 07 - Pipe Operator and Function Composition
+# Demonstrates |> pipe, . compose, >> bind
+# ============================================================
+
+# --- Helper functions ---
+def add1(n)    = n + 1
+def double(n)  = n * 2
+def square(n)  = n * n
+def negate(n)  = -n
+
+# --- |> Pipe operator: passes value forward through a chain ---
+let r1 = 5 |> add1 |> double |> square
+print("5 |> add1 |> double |> square =", r1)   # ((5+1)*2)^2 = 144
+
+# Pipeline with built-ins
+let r2 = [3, 1, 4, 1, 5, 9, 2, 6]
+         |> sorted
+         |> list
+print("Sorted:", r2)
+
+let r3 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+         |> filter(lambda x: x % 2 == 0)
+         |> map(lambda x: x * x)
+         |> sum
+print("Sum of squares of evens [1..10] =", r3)
+
+# String pipeline
+let result = "  hello world  "
+             |> str.strip
+             |> str.title
+print("String pipeline:", result)
+
+# --- . Function composition: f . g = \x -> f(g(x)) ---
+# Applies right-to-left: (f . g)(x) = f(g(x))
+let add1_then_double = double . add1          # double(add1(x))
+let square_then_neg  = negate . square        # negate(square(x))
+
+print("\n(double . add1)(5)  =", add1_then_double(5))  # double(6) = 12
+print("(negate . square)(4) =", square_then_neg(4))    # negate(16) = -16
+
+# Three-function composition
+let pipeline_fn = str . double . add1          # str(double(add1(x)))
+print("(str . double . add1)(7) =", pipeline_fn(7))    # str(16) = "16"
+
+# --- >> Bind operator (sequential application) ---
+let bound = 5 >> add1 >> double >> square
+print("\n5 >> add1 >> double >> square =", bound)
+
+# --- Practical example: data pipeline ---
+let data = [" Alice", " Bob", " Carol", " Dave"]
+
+let clean_names = data
+                  |> map(str.strip)
+                  |> map(str.upper)
+                  |> sorted
+                  |> list
+
+print("\nCleaned names:", clean_names)

@@ -1,0 +1,4 @@
+def foo(n):
+    let result = [10, 20, 30]
+    result[n]
+print(foo(1))

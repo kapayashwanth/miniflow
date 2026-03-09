@@ -1,0 +1,66 @@
+# ============================================================
+# MiniFlow Sample 06 - Pattern Matching
+# Demonstrates match/case with literals, wildcards, and guards
+# ============================================================
+
+# --- Matching on literals ---
+def day_type(day):
+    match day:
+        case "Saturday": "Weekend"
+        case "Sunday":   "Weekend"
+        case _:          "Weekday"
+
+print(day_type("Monday"))    # Weekday
+print(day_type("Saturday"))  # Weekend
+
+# --- Matching on numbers ---
+def describe(n):
+    match n:
+        case 0: "zero"
+        case 1: "one"
+        case 2: "two"
+        case _: f"some number ({n})"
+
+for i in range(4):
+    print(i, "->", describe(i))
+
+# --- Recursive list processing via match ---
+def my_sum(lst):
+    match lst:
+        case []:       0
+        case [x, *rest]: x + my_sum(rest)
+
+def my_len(lst):
+    match lst:
+        case []:         0
+        case [_, *rest]: 1 + my_len(rest)
+
+let data = [10, 20, 30, 40, 50]
+print("\nSum via match :", my_sum(data))
+print("Len via match :", my_len(data))
+
+# --- Matching on tuples ---
+def quadrant(point):
+    match point:
+        case (0, 0): "Origin"
+        case (x, 0): f"X-axis at {x}"
+        case (0, y): f"Y-axis at {y}"
+        case (x, y):
+            if x > 0 and y > 0: "Q1"
+            elif x < 0 and y > 0: "Q2"
+            elif x < 0 and y < 0: "Q3"
+            else: "Q4"
+
+for pt in [(0,0), (3,0), (0,-2), (1,1), (-1,2), (-3,-1), (2,-4)]:
+    print(pt, "->", quadrant(pt))
+
+# --- Fibonacci via pattern matching ---
+def fib(n):
+    match n:
+        case 0: 0
+        case 1: 1
+        case _: fib(n-1) + fib(n-2)
+
+print("\nFibonacci:")
+for i in range(10):
+    print(f"  fib({i}) = {fib(i)}")

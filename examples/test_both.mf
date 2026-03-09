@@ -1,0 +1,16 @@
+def cube(n) = n * n * n
+let numbers = range(1, 21)
+let sum_odd_cubes = numbers
+                   |> filter(odd)
+                   |> filter(lambda x: x < 15)
+                   |> map(cube)
+                   |> sum
+print("Sum:", sum_odd_cubes)
+
+let text = "the quick brown fox jumps over the lazy dog the fox"
+let word_freq = text.split(" ")
+               |> sorted
+               |> group
+               |> map(lambda g: (head(g), length(g)))
+               |> sorted
+print("Word frequencies:", word_freq)

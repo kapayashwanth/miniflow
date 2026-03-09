@@ -1,0 +1,65 @@
+# ============================================================
+# MiniFlow Sample 08 - Higher-Order Functions
+# Demonstrates map, filter, reduce/foldl, partial application
+# ============================================================
+
+# --- map: apply a function to every element ---
+let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+let doubled  = list(map(lambda x: x * 2, nums))
+let squared  = list(map(lambda x: x * x, nums))
+let as_strs  = list(map(str, nums))
+
+print("Original :", nums)
+print("Doubled  :", doubled)
+print("Squared  :", squared)
+print("Strings  :", as_strs)
+
+# --- filter: keep elements that match a predicate ---
+let evens    = list(filter(lambda x: x % 2 == 0, nums))
+let odds     = list(filter(lambda x: x % 2 != 0, nums))
+let big      = list(filter(lambda x: x > 5, nums))
+
+print("\nEvens    :", evens)
+print("Odds     :", odds)
+print("Over 5   :", big)
+
+# --- foldl (reduce): accumulate from the left ---
+let total    = foldl(lambda acc, x: acc + x,  0, nums)
+let product  = foldl(lambda acc, x: acc * x,  1, [1,2,3,4,5])
+let maximum  = foldl(lambda acc, x: if x > acc then x else acc, nums[0], nums)
+
+print("\nSum      :", total)
+print("Product  :", product)
+print("Max      :", maximum)
+
+# Build a string from a list
+let sentence = foldl(lambda acc, w: acc ++ " " ++ w, "Words:", ["hello", "world", "from", "MiniFlow"])
+print("Sentence :", sentence)
+
+# --- Partial application / currying ---
+def add(a, b)    = a + b
+def mul(a, b)    = a * b
+def power(b, e)  = b ** e
+
+let add10   = \x -> add(10, x)
+let times3  = \x -> mul(3, x)
+let squares = \x -> power(x, 2)
+
+print("\nPartial add10(7)   =", add10(7))
+print("Partial times3(8)  =", times3(8))
+print("Partial squares(9) =", squares(9))
+
+# Apply a list of transformations in sequence
+let transforms = [add10, times3, squares]
+let value = foldl(lambda acc, f: f(acc), 1, transforms)
+print("Composed transforms on 1:", value)   # squares(times3(add10(1))) = (33)^2 = 1089
+
+# --- zipWith: pairwise operation on two lists ---
+let xs = [1, 2, 3, 4, 5]
+let ys = [10, 20, 30, 40, 50]
+let sums     = list(map(lambda p: p[0] + p[1], zip(xs, ys)))
+let products = list(map(lambda p: p[0] * p[1], zip(xs, ys)))
+
+print("\nzipWith (+):", sums)
+print("zipWith (*):", products)

@@ -10,12 +10,12 @@ module REPL
 import Types
 import Environment
 import Lexer
-import Parser
+import Parser (parseProgram, parseExprTokens, ParseError(..))
 import Evaluator
 import Pretty
 import Data.IORef
 import Data.List (isPrefixOf, intercalate)
-import Control.Exception (try, catch, SomeException, evaluate)
+import Control.Exception (try, catch, throwIO, SomeException, evaluate)
 import System.IO (hFlush, stdout, hSetBuffering, BufferMode(..), stdin, hSetEcho)
 
 -- =============================================================================
@@ -110,12 +110,9 @@ execInput st input = do
   if null trimmed
     then return st
     else do
-      result <- try (runReplLine (rsEnv st) trimmed)
+      result <- try (runReplLine (rsEnv st) trimmed) :: IO (Either SomeException (Maybe Value))
       case result of
-        Left (ex :: MiniFlowError) -> do
-          putStrLn (prettyError ex)
-          return st
-        Left (ex :: SomeException) -> do
+        Left ex -> do
           putStrLn ("Error: " ++ show ex)
           return st
         Right mval -> do
@@ -135,7 +132,7 @@ runReplLine env input = do
     Left (LexError pos msg) -> throwMF (MFSyntaxError msg pos)
     Right ts -> return ts
   -- Try to parse as expression first, then as statement
-  case parseExpr tokens of
+  case parseExprTokens tokens of
     Right expr -> do
       val <- evalExpr env expr
       return (Just val)
@@ -145,23 +142,8 @@ runReplLine env input = do
         evalProgram env prog
         return Nothing
 
-parseExpr :: [TokenInfo] -> Either ParseError Expr
-parseExpr toks =
-  let st = ParserState{ psTokens = toks, psPos = noPos }
-  in case runParser (parsePipeExpr <* expectEOF) st of
-    Left  e       -> Left e
-    Right (e, _)  -> Right e
-
-expectEOF :: Parser ()
-expectEOF = do
-  t <- peek
-  case t of
-    TEOF     -> return ()
-    TNewline -> consume >> expectEOF
-    _        -> return ()  -- allow trailing content
-
 throwMF :: MiniFlowError -> IO a
-throwMF = Control.Exception.throwIO
+throwMF = throwIO
 
 -- =============================================================================
 -- FILE LOADING
@@ -175,12 +157,9 @@ loadFile st filename = do
       putStrLn ("Error loading file: " ++ show ex)
       return st
     Right content -> do
-      execResult <- try (runFile (rsEnv st) filename content)
+      execResult <- try (runFile (rsEnv st) filename content) :: IO (Either SomeException ())
       case execResult of
-        Left (ex :: MiniFlowError) -> do
-          putStrLn (prettyError ex)
-          return st
-        Left (ex :: SomeException) -> do
+        Left ex -> do
           putStrLn ("Error: " ++ show ex)
           return st
         Right _ -> do
@@ -208,7 +187,7 @@ handleTypeQuery env exprStr = do
     tokens <- case tokenize exprStr "<type_query>" of
       Left (LexError pos msg) -> throwMF (MFSyntaxError msg pos)
       Right ts -> return ts
-    case parseExpr tokens of
+    case parseExprTokens tokens of
       Left (ParseError pos msg) -> throwMF (MFSyntaxError msg pos)
       Right expr -> do
         val <- evalExpr env expr

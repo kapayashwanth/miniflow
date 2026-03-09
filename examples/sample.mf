@@ -99,17 +99,14 @@ print("--- Pattern Matching ---")
 def describe(x):
     match x:
         case 0:
-            "zero"
+            return "zero"
         case 1:
-            "one"
-        case n if n < 0:
-            "negative"
+            return "one"
         case _:
-            "large"
+            return "other"
 
 print(describe(0))
 print(describe(1))
-print(describe(-3))
 print(describe(100))
 
 # ------- 10. List comprehensions -------

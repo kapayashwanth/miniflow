@@ -1,0 +1,15 @@
+
+cd "c:\Users\kapay\SEM4\23CSE212_PFPL\Mini_Project"
+
+
+runhaskell -isrc Main.hs samples/01_hello_world.mf
+runhaskell -isrc Main.hs samples/02_variables_and_types.mf
+runhaskell -isrc Main.hs samples/03_functions.mf
+runhaskell -isrc Main.hs samples/04_collections.mf
+runhaskell -isrc Main.hs samples/05_control_flow.mf
+runhaskell -isrc Main.hs samples/06_pattern_matching.mf
+runhaskell -isrc Main.hs samples/07_pipes_and_compose.mf
+runhaskell -isrc Main.hs samples/08_higher_order_functions.mf
+
+
+runhaskell -isrc Main.hs

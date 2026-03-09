@@ -1,0 +1,7 @@
+print("test1")
+def fib_naive(n):
+    match n:
+        case 0: 0
+        case 1: 1
+        case _: fib_naive(n-1) + fib_naive(n-2)
+print("Naive fib(10):", fib_naive(10))

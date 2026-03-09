@@ -1,0 +1,5 @@
+def double(x):
+    x * 2
+
+let r = 5 |> double
+print(r)

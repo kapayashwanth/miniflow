@@ -1,0 +1,7 @@
+let text = "the quick brown fox jumps over the lazy dog the fox"
+let word_freq = text.split(" ")
+               |> sorted
+               |> group
+               |> map(lambda g: (head(g), length(g)))
+               |> sorted
+print("Word frequencies:", word_freq)

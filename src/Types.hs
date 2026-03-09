@@ -172,6 +172,8 @@ data Pattern
   | PAs     Pattern String             -- pat as name
   | POr     Pattern Pattern            -- pat1 | pat2
   | PTyped  Pattern TypeExpr           -- pat : Type
+  | PIndex  Expr Expr                  -- container[key] (assignment target)
+  | PField  Expr String                -- obj.field (assignment target)
   deriving (Show, Eq)
 
 -- A single match arm
@@ -356,6 +358,26 @@ data Value
 data LazyList
   = LNil
   | LCons Value (IO LazyList)
+
+instance Show Value where
+  show (VInt n)        = show n
+  show (VFloat d)      = show d
+  show (VBool True)    = "True"
+  show (VBool False)   = "False"
+  show (VStr s)        = show s
+  show VNone           = "None"
+  show (VList _)       = "<list>"
+  show (VTuple vs)     = "(" ++ concatMap (\v -> show v ++ ", ") vs ++ ")"
+  show (VDict _)       = "<dict>"
+  show (VSet _)        = "<set>"
+  show (VClosure{vcName=n}) = "<function " ++ n ++ ">"
+  show (VBuiltin{vbName=n}) = "<builtin " ++ n ++ ">"
+  show (VRecord n _)   = "<" ++ n ++ " instance>"
+  show (VType n)       = "<type " ++ n ++ ">"
+  show (VLazyList _)   = "<lazy_list>"
+  show (VIterator _)   = "<iterator>"
+  show (VModule n _)   = "<module " ++ n ++ ">"
+  show (VNativeExn s)  = "<exception " ++ s ++ ">"
 
 -- Value must be Ord for use as Dict keys
 instance Eq Value where

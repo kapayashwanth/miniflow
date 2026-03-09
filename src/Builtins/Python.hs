@@ -4,6 +4,7 @@
 -- =============================================================================
 module Builtins.Python
   ( pythonBuiltinList
+  , setApplyCallback
   ) where
 
 import Types
@@ -14,10 +15,11 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.List (intercalate, nub, sort, sortBy, groupBy, isPrefixOf,
                   isSuffixOf, isInfixOf, elemIndex, findIndex, partition,
-                  stripPrefix, stripSuffix)
+                  stripPrefix)
 import Data.Char (toUpper, toLower, isAlpha, isAlphaNum, isDigit, isSpace,
                   isUpper, isLower, isPunctuation, ord, chr, digitToInt)
 import Control.Exception (throwIO, catch, SomeException)
+import Control.Monad (when)
 import System.IO (hFlush, stdout, hSetBuffering, BufferMode(..), stdin, stderr)
 import System.Exit (exitWith, ExitCode(..))
 import Text.Printf (printf)
@@ -308,6 +310,7 @@ toListElems (VDict ref)   = do
   m <- readIORef ref
   return (map fst (Map.toList m))
 toListElems (VIterator ref) = readIORef ref
+toListElems (VLazyList r)   = lazyToList r
 toListElems v = throwIO (MFTypeError
   { mfMsg = "'" ++ typeNameOf v ++ "' object is not iterable"
   , mfPos = noPos })
@@ -650,6 +653,7 @@ transposeShort xs = if any null xs
   else map head xs : transposeShort (map tail xs)
 
 builtinMap :: [Value] -> [(String, Value)] -> IO Value
+builtinMap [fn, VLazyList ref] _ = lazyMap (\v -> callFn fn [v]) ref
 builtinMap (fn : iterables) _ = do
   elems <- mapM toListElems iterables
   let zipped = transposeShort elems
@@ -659,6 +663,7 @@ builtinMap (fn : iterables) _ = do
 builtinMap _ _ = throwIO (MFTypeError { mfMsg = "map() requires at least 2 arguments", mfPos = noPos })
 
 builtinFilter :: [Value] -> [(String, Value)] -> IO Value
+builtinFilter [fn, VLazyList ref] _ = lazyFilter (\v -> fmap isTruthy (callFn fn [v])) ref
 builtinFilter [fn, v] _ = do
   elems <- toListElems v
   kept  <- filterM (\x -> fmap isTruthy (callFn fn [x])) elems
@@ -931,8 +936,8 @@ mulVals a b = throwIO (MFTypeError
   { mfMsg = "unsupported operand types for *: '" ++ typeNameOf a ++ "' and '" ++ typeNameOf b ++ "'"
   , mfPos = noPos })
 
-modifyIORef :: IORef a -> (a -> a) -> IO ()
-modifyIORef ref f = readIORef ref >>= writeIORef ref . f
+modifyIORef' :: IORef a -> (a -> a) -> IO ()
+modifyIORef' ref f = readIORef ref >>= writeIORef ref . f
 
 stripSuffix :: String -> String -> Maybe String
 stripSuffix suffix str =

@@ -1,0 +1,6 @@
+def fib_lc(n):
+    let result = foldl(lambda acc, _: acc ++ [acc[-1] + acc[-2]],
+                       [0, 1],
+                       range(n - 1))
+    result[n]
+print("fib_lc(15):", fib_lc(15))

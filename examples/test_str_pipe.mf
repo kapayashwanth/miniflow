@@ -1,0 +1,10 @@
+let cleaned = "  HELLO WORLD  "
+              |> str.strip
+              |> str.lower
+              |> str.title
+print("String pipeline:", cleaned)
+
+let text = "hello world"
+let word_freq = text.split(" ")
+               |> sorted
+print("Words:", word_freq)

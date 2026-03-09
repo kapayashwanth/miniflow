@@ -11,6 +11,7 @@ import Types
 import Data.Char
 import Data.List (isPrefixOf, stripPrefix)
 import Data.Maybe (fromMaybe, mapMaybe)
+import qualified Data.Map.Strict as Map
 
 -- =============================================================================
 -- LEXER STATE
@@ -47,7 +48,7 @@ tokenize src file =
   let st0 = initLexState src file
   in case runLexer st0 of
     Left  e  -> Left e
-    Right ts -> Right (ts ++ [TokenInfo TEOF (SourcePos file (countLines src) 0)])
+    Right ts -> Right (insertIndentDedent (ts ++ [TokenInfo TEOF (SourcePos file (countLines src) 0)]))
 
 countLines :: String -> Int
 countLines = length . filter (== '\n')
@@ -106,28 +107,14 @@ nextToken st = case lsSource st of
 handleNewline :: LexState -> String -> Either LexError (TokenInfo, LexState)
 handleNewline st cs =
   let (spaces, rest) = span (\c -> c == ' ' || c == '\t') cs
-      indent         = length spaces   -- naive: 1 space = 1 level
-      top            = head (lsIndents st)
+      indent         = length spaces
       pos            = curPos st
       st1            = st{ lsSource = rest
                          , lsLine   = lsLine st + 1
                          , lsCol    = indent + 1
                          }
-  in if indent > top
-       then do
-         let st2 = st1{ lsIndents = indent : lsIndents st1 }
-         Right (TokenInfo TIndent pos, st2)
-       else if indent < top
-         then do
-           let (popped, remaining) = span (> indent) (lsIndents st)
-               nDedents = length popped
-               st2 = st1{ lsIndents = remaining }
-           -- We emit the first DEDENT here; the rest come on next calls
-           -- (simplified: emit all at once as list, but our interface is single-token)
-           -- For simplicity we just emit TNewline here and handle dedent in Parser
-           Right (TokenInfo TNewline pos, st1)
-         else
-           Right (TokenInfo TNewline pos, st1)
+  -- Always emit TNewline; indent/dedent is handled by insertIndentDedent post-pass
+  in Right (TokenInfo TNewline pos, st1)
 
 -- =============================================================================
 -- SKIP HELPERS
@@ -185,7 +172,7 @@ lexStringSingle st = do
   Right (TokenInfo (TStr s) pos, st')
 
 lexStringContent :: Char -> String -> SourcePos -> Either LexError (String, String, Int)
-lexStringContent q = go 0
+lexStringContent q s _ = go 0 s
   where
     go n []           = Left (LexError noPos "Unterminated string literal")
     go n (c:cs)
@@ -339,8 +326,6 @@ keywords = Map.fromList
   , ("class",    TIdent "class")
   ]
 
-import qualified Data.Map.Strict as Map
-
 lexIdent :: LexState -> Either LexError (TokenInfo, LexState)
 lexIdent st = do
   let pos = curPos st
@@ -419,27 +404,46 @@ matchSymbol _           = (Nothing,          0)
 -- this function converts them into proper INDENT/DEDENT sequences.
 
 insertIndentDedent :: [TokenInfo] -> [TokenInfo]
-insertIndentDedent tis = go [0] tis
+insertIndentDedent tis = go [0] 0 tis
   where
-    go _ [] = []
-    go stack (ti:tis) = case tiToken ti of
+    -- depth: nesting depth inside (), [], {} -- suppress indent/dedent when > 0
+    go stack _ [] =
+      let n = length stack - 1
+      in replicate n (TokenInfo TDedent (SourcePos "" 0 0))
+    go stack depth (ti:rest) = case tiToken ti of
+      TEOF ->
+        let n   = length stack - 1
+            pos = tiPos ti
+        in replicate n (TokenInfo TDedent pos) ++ [ti]
+      TLParen   -> ti : go stack (depth + 1) rest
+      TLBracket -> ti : go stack (depth + 1) rest
+      TLBrace   -> ti : go stack (depth + 1) rest
+      TRParen   -> ti : go stack (max 0 (depth - 1)) rest
+      TRBracket -> ti : go stack (max 0 (depth - 1)) rest
+      TRBrace   -> ti : go stack (max 0 (depth - 1)) rest
       TNewline ->
-        let pos     = tiPos ti
-            nextCol = case tis of
-              (t:_) -> spCol (tiPos t) - 1
-              []    -> 0
-            top     = head stack
-        in if nextCol > top
-             then TokenInfo TIndent pos : TokenInfo TNewline pos
-                  : go (nextCol : stack) tis
-           else if nextCol < top
-             then let (popped, newStack) = span (> nextCol) stack
-                      nDedents = length popped
-                  in replicate nDedents (TokenInfo TDedent pos)
-                     ++ [TokenInfo TNewline pos]
-                     ++ go newStack tis
-           else ti : go stack tis
-      _ -> ti : go stack tis
+        -- Inside brackets: swallow the newline entirely (no indent/dedent)
+        if depth > 0
+          then go stack depth rest
+          else
+            let pos     = tiPos ti
+                nextCol = case rest of
+                  (t:_) | tiToken t /= TEOF -> spCol (tiPos t) - 1
+                  _     -> 0
+                top     = case stack of
+                  (s:_) -> s
+                  []    -> 0
+            in if nextCol > top
+                 then TokenInfo TNewline pos : TokenInfo TIndent pos
+                      : go (nextCol : stack) depth rest
+               else if nextCol < top
+                 then let (popped, newStack) = span (> nextCol) stack
+                          nDedents = length popped
+                      in replicate nDedents (TokenInfo TDedent pos)
+                         ++ [TokenInfo TNewline pos]
+                         ++ go newStack depth rest
+               else ti : go stack depth rest
+      _ -> ti : go stack depth rest
 
 -- =============================================================================
 -- PRETTY-PRINT TOKENS (for debugging)

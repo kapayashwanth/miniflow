@@ -5,6 +5,9 @@
 
 print("=== PIPE OPERATOR |> ===")
 
+# Basic definitions
+def double(n) = n * 2
+
 # Basic pipe: value |> function
 let result1 = 5 |> double
 print("5 |> double =", result1)

@@ -26,6 +26,9 @@ module Builtins.Core
   , iterateIO
   , listFromIO
   , lazyTake
+  , lazyMap
+  , lazyFilter
+  , lazyToList
   ) where
 
 import Types
@@ -312,10 +315,60 @@ lazyTake n ref = do
       vs      <- lazyTake (n-1) restRef
       return (v : vs)
 
+-- | Map a function lazily over a LazyList, returning a new VLazyList
+lazyMap :: (Value -> IO Value) -> IORef LazyList -> IO Value
+lazyMap f ref = do
+  ll <- readIORef ref
+  buildMapped f ll
+
+buildMapped :: (Value -> IO Value) -> LazyList -> IO Value
+buildMapped _ LNil = do
+  r <- newIORef LNil
+  return (VLazyList r)
+buildMapped f (LCons v mkRest) = do
+  v' <- f v
+  let next = mkRest >>= \rest -> do
+        VLazyList r <- buildMapped f rest
+        readIORef r
+  r <- newIORef (LCons v' next)
+  return (VLazyList r)
+
+-- | Filter a LazyList lazily, returning a new VLazyList
+lazyFilter :: (Value -> IO Bool) -> IORef LazyList -> IO Value
+lazyFilter p ref = do
+  ll <- readIORef ref
+  buildFiltered p ll
+
+buildFiltered :: (Value -> IO Bool) -> LazyList -> IO Value
+buildFiltered _ LNil = newIORef LNil >>= \r -> return (VLazyList r)
+buildFiltered p (LCons v mkRest) = do
+  keep <- p v
+  if keep
+    then do
+      let next = mkRest >>= \rest -> do
+            VLazyList r <- buildFiltered p rest
+            readIORef r
+      r <- newIORef (LCons v next)
+      return (VLazyList r)
+    else mkRest >>= buildFiltered p
+
+-- | Force a lazy list to a Haskell list (only safe for finite lists)
+lazyToList :: IORef LazyList -> IO [Value]
+lazyToList ref = do
+  ll <- readIORef ref
+  case ll of
+    LNil -> return []
+    LCons v mkRest -> do
+      rest <- mkRest
+      restRef <- newIORef rest
+      vs <- lazyToList restRef
+      return (v : vs)
+
 listFromIO :: Value -> IO [Value]
-listFromIO (VList ref)  = readIORef ref
-listFromIO (VTuple vs)  = return vs
-listFromIO (VStr s)     = return (map (VStr . (:[])) s)
-listFromIO v            = throwIO (MFTypeError
+listFromIO (VList ref)   = readIORef ref
+listFromIO (VTuple vs)   = return vs
+listFromIO (VStr s)      = return (map (VStr . (:[])) s)
+listFromIO (VLazyList r) = lazyToList r
+listFromIO v             = throwIO (MFTypeError
   { mfMsg = "not iterable: " ++ typeOf v
   , mfPos = noPos })

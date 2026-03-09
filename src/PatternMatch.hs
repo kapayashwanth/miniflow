@@ -97,6 +97,10 @@ matchPattern env pat val = case pat of
   -- Typed pattern: match underlying pattern (type check is optional)
   PTyped inner _ty -> matchPattern env inner val
 
+  -- Assignment-target patterns: not valid in match context
+  PIndex _ _ -> return False
+  PField _ _ -> return False
+
 -- | Match a list of patterns against a list of values (all must succeed)
 matchAll :: Env -> [Pattern] -> [Value] -> IO Bool
 matchAll _ [] [] = return True

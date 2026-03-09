@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="800" height="600" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI', Consolas, monospace">
+
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <!-- MiniFlow fill -->
+    <linearGradient id="mfFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"   stop-color="#1f6feb" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#388bfd" stop-opacity="0.35"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="600" fill="url(#bg2)" rx="16"/>
+
+  <!-- Title -->
+  <text x="400" y="40" text-anchor="middle" fill="#e6edf3" font-size="20" font-weight="700" letter-spacing="0.5">
+    MiniFlow vs Python vs Haskell — Feature Comparison
+  </text>
+  <text x="400" y="62" text-anchor="middle" fill="#8b949e" font-size="12">
+    Radar chart across 6 design dimensions
+  </text>
+  <line x1="40" y1="74" x2="760" y2="74" stroke="#30363d" stroke-width="1"/>
+
+  <!-- ══════════════════════════════════════════════
+       RADAR CHART  —  centre (400, 340), r_max = 200
+       6 axes (60° apart), starting at top (−90°)
+       Axes labels: Readability · Functional Power · Pipeline Support
+                    Pattern Matching · Built-ins Count · Syntax Simplicity
+  ══════════════════════════════════════════════ -->
+
+  <!-- Grid rings (20%, 40%, 60%, 80%, 100%) -->
+  <!-- ring helper: each ring is a hexagon at 0.2 … 1.0 of r=200 -->
+  <!-- r=40 -->
+  <polygon points="400,300 434.6,320 434.6,360 400,380 365.4,360 365.4,320" fill="none" stroke="#21262d" stroke-width="1"/>
+  <!-- r=80 -->
+  <polygon points="400,260 469.3,300 469.3,380 400,420 330.7,380 330.7,300" fill="none" stroke="#21262d" stroke-width="1"/>
+  <!-- r=120 -->
+  <polygon points="400,220 503.9,280 503.9,400 400,460 296.1,400 296.1,280" fill="none" stroke="#21262d" stroke-width="1"/>
+  <!-- r=160 -->
+  <polygon points="400,180 538.6,260 538.6,420 400,500 261.4,420 261.4,260" fill="none" stroke="#21262d" stroke-width="1"/>
+  <!-- r=200 (outer) -->
+  <polygon points="400,140 573.2,240 573.2,440 400,540 226.8,440 226.8,240" fill="none" stroke="#30363d" stroke-width="1.5"/>
+
+  <!-- Axis lines (from centre to each vertex of outermost hex) -->
+  <!-- axis 0: top      (400,140) -->
+  <line x1="400" y1="340" x2="400"   y2="140"   stroke="#484f58" stroke-width="1.5"/>
+  <!-- axis 1: top-right (573,240) -->
+  <line x1="400" y1="340" x2="573.2" y2="240"   stroke="#484f58" stroke-width="1.5"/>
+  <!-- axis 2: btm-right (573,440) -->
+  <line x1="400" y1="340" x2="573.2" y2="440"   stroke="#484f58" stroke-width="1.5"/>
+  <!-- axis 3: bottom    (400,540) -->
+  <line x1="400" y1="340" x2="400"   y2="540"   stroke="#484f58" stroke-width="1.5"/>
+  <!-- axis 4: btm-left  (227,440) -->
+  <line x1="400" y1="340" x2="226.8" y2="440"   stroke="#484f58" stroke-width="1.5"/>
+  <!-- axis 5: top-left  (227,240) -->
+  <line x1="400" y1="340" x2="226.8" y2="240"   stroke="#484f58" stroke-width="1.5"/>
+
+  <!-- Axis tick labels (%) at 40%, 80% -->
+  <text x="404" y="262" fill="#484f58" font-size="9">40%</text>
+  <text x="404" y="182" fill="#484f58" font-size="9">80%</text>
+
+  <!-- ── Axis Labels ── -->
+  <!-- 0: top — Readability -->
+  <text x="400" y="126" text-anchor="middle" fill="#79c0ff" font-size="12" font-weight="600">Readability</text>
+  <!-- 1: top-right — Functional Power -->
+  <text x="592" y="234" text-anchor="start"  fill="#79c0ff" font-size="12" font-weight="600">Functional Power</text>
+  <!-- 2: btm-right — Pipeline Support -->
+  <text x="592" y="454" text-anchor="start"  fill="#79c0ff" font-size="12" font-weight="600">Pipeline Support</text>
+  <!-- 3: bottom — Pattern Matching -->
+  <text x="400" y="558" text-anchor="middle" fill="#79c0ff" font-size="12" font-weight="600">Pattern Matching</text>
+  <!-- 4: btm-left — Built-ins -->
+  <text x="208" y="454" text-anchor="end"    fill="#79c0ff" font-size="12" font-weight="600">Built-ins Count</text>
+  <!-- 5: top-left — Syntax Simplicity -->
+  <text x="208" y="234" text-anchor="end"    fill="#79c0ff" font-size="12" font-weight="600">Syntax Simplicity</text>
+
+  <!--
+    Scores (0–1, scaled by r=200 from centre=400,340):
+    point = centre + score * (vertex - centre)
+    vertex offsets from centre (400,340):
+      0: ( 0,  -200)  top
+      1: (+173.2, -100)  top-right
+      2: (+173.2, +100)  btm-right
+      3: ( 0,  +200)  bottom
+      4: (-173.2, +100)  btm-left
+      5: (-173.2, -100)  top-left
+
+    === MiniFlow ===
+      Readability       0.85  → (400+0*0.85,    340-200*0.85)  = (400,   170)
+      Functional Power  0.90  → (400+173.2*0.90, 340-100*0.90) = (555.9, 250)
+      Pipeline Support  1.00  → (400+173.2*1.00, 340+100*1.00) = (573.2, 440)
+      Pattern Matching  0.90  → (400+0*0.90,    340+200*0.90)  = (400,   520)
+      Built-ins Count   0.92  → (400-173.2*0.92, 340+100*0.92) = (240.7, 432)
+      Syntax Simplicity 0.85  → (400-173.2*0.85, 340-100*0.85) = (252.8, 255)
+
+    === Python ===
+      Readability       0.95  → (400, 150)
+      Functional Power  0.65  → (400+173.2*0.65, 340-100*0.65) = (512.6, 275)
+      Pipeline Support  0.40  → (400+173.2*0.40, 340+100*0.40) = (469.3, 380)
+      Pattern Matching  0.70  → (400+0, 340+200*0.70)          = (400,   480)
+      Built-ins Count   0.95  → (400-173.2*0.95, 340+100*0.95) = (235.5, 435)
+      Syntax Simplicity 0.90  → (400-173.2*0.90, 340-100*0.90) = (244.1, 250)
+
+    === Haskell ===
+      Readability       0.55  → (400, 230)
+      Functional Power  0.98  → (400+173.2*0.98, 340-100*0.98) = (569.7, 242)
+      Pipeline Support  0.70  → (400+173.2*0.70, 340+100*0.70) = (521.2, 410)
+      Pattern Matching  0.98  → (400, 340+200*0.98)            = (400,   536)
+      Built-ins Count   0.75  → (400-173.2*0.75, 340+100*0.75) = (270.1, 415)
+      Syntax Simplicity 0.45  → (400-173.2*0.45, 340-100*0.45) = (322.1, 295)
+  -->
+
+  <!-- Haskell polygon (bottom layer) -->
+  <polygon
+    points="400,230 569.7,242 521.2,410 400,536 270.1,415 322.1,295"
+    fill="#8957e5" fill-opacity="0.20"
+    stroke="#8957e5" stroke-width="2" stroke-dasharray="6,3"/>
+
+  <!-- Python polygon -->
+  <polygon
+    points="400,150 512.6,275 469.3,380 400,480 235.5,435 244.1,250"
+    fill="#3fb950" fill-opacity="0.20"
+    stroke="#3fb950" stroke-width="2" stroke-dasharray="6,3"/>
+
+  <!-- MiniFlow polygon (top layer) -->
+  <polygon
+    points="400,170 555.9,250 573.2,440 400,520 240.7,432 252.8,255"
+    fill="url(#mfFill)"
+    stroke="#388bfd" stroke-width="2.5"/>
+
+  <!-- MiniFlow data points -->
+  <circle cx="400"   cy="170"  r="5" fill="#388bfd"/>
+  <circle cx="555.9" cy="250"  r="5" fill="#388bfd"/>
+  <circle cx="573.2" cy="440"  r="5" fill="#388bfd"/>
+  <circle cx="400"   cy="520"  r="5" fill="#388bfd"/>
+  <circle cx="240.7" cy="432"  r="5" fill="#388bfd"/>
+  <circle cx="252.8" cy="255"  r="5" fill="#388bfd"/>
+
+  <!-- Python data points -->
+  <circle cx="400"   cy="150"  r="4" fill="#3fb950"/>
+  <circle cx="512.6" cy="275"  r="4" fill="#3fb950"/>
+  <circle cx="469.3" cy="380"  r="4" fill="#3fb950"/>
+  <circle cx="400"   cy="480"  r="4" fill="#3fb950"/>
+  <circle cx="235.5" cy="435"  r="4" fill="#3fb950"/>
+  <circle cx="244.1" cy="250"  r="4" fill="#3fb950"/>
+
+  <!-- Haskell data points -->
+  <circle cx="400"   cy="230"  r="4" fill="#8957e5"/>
+  <circle cx="569.7" cy="242"  r="4" fill="#8957e5"/>
+  <circle cx="521.2" cy="410"  r="4" fill="#8957e5"/>
+  <circle cx="400"   cy="536"  r="4" fill="#8957e5"/>
+  <circle cx="270.1" cy="415"  r="4" fill="#8957e5"/>
+  <circle cx="322.1" cy="295"  r="4" fill="#8957e5"/>
+
+  <!-- ══════ Legend ══════ -->
+  <rect x="30" y="495" width="160" height="80" rx="8" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <!-- MiniFlow -->
+  <line x1="46" y1="518" x2="76" y2="518" stroke="#388bfd" stroke-width="2.5"/>
+  <circle cx="61" cy="518" r="4" fill="#388bfd"/>
+  <text x="84" y="522" fill="#e6edf3" font-size="13" font-weight="600">MiniFlow</text>
+  <!-- Python -->
+  <line x1="46" y1="540" x2="76" y2="540" stroke="#3fb950" stroke-width="2" stroke-dasharray="5,3"/>
+  <circle cx="61" cy="540" r="3.5" fill="#3fb950"/>
+  <text x="84" y="544" fill="#e6edf3" font-size="13">Python 3.x</text>
+  <!-- Haskell -->
+  <line x1="46" y1="562" x2="76" y2="562" stroke="#8957e5" stroke-width="2" stroke-dasharray="5,3"/>
+  <circle cx="61" cy="562" r="3.5" fill="#8957e5"/>
+  <text x="84" y="566" fill="#e6edf3" font-size="13">Haskell GHC</text>
+
+  <!-- Footer -->
+  <line x1="40" y1="580" x2="760" y2="580" stroke="#21262d" stroke-width="1"/>
+  <text x="400" y="594" text-anchor="middle" fill="#484f58" font-size="10">
+    MiniFlow combines Python readability  +  Haskell functional power  +  Elixir-style pipelines
+  </text>
+
+</svg>

@@ -4,6 +4,7 @@
 -- =============================================================================
 module Builtins.Haskell
   ( haskellBuiltinList
+  , setApplyCallback
   ) where
 
 import Types
@@ -21,7 +22,7 @@ import Data.List
   , partition, find, findIndex, elemIndex
   , stripPrefix, maximumBy, minimumBy
   )
-import Data.Char (toLower, toUpper, isAlpha, isDigit, isSpace, isUpper, isLower, ord, chr)
+import Data.Char (toLower, toUpper, isAlpha, isDigit, isSpace, isUpper, isLower, ord, chr, digitToInt)
 import Control.Exception (throwIO, catch, SomeException)
 import Data.Maybe (fromMaybe, mapMaybe, catMaybes, isJust, isNothing, listToMaybe)
 import System.IO.Unsafe (unsafePerformIO)
@@ -35,6 +36,9 @@ applyCallback = unsafePerformIO $ newIORef defaultApply
 defaultApply :: Value -> [Value] -> IO Value
 defaultApply (VBuiltin _ f) args = f args []
 defaultApply v _ = throwIO (MFTypeError { mfMsg = "not callable: " ++ typeNameOf v, mfPos = noPos })
+
+setApplyCallback :: (Value -> [Value] -> IO Value) -> IO ()
+setApplyCallback fn = writeIORef applyCallback fn
 
 callFn :: Value -> [Value] -> IO Value
 callFn fn args = do
@@ -279,10 +283,13 @@ builtinConcatMap [fn, v] _ = do
 builtinConcatMap _ _ = err "concatMap" 2
 
 builtinTake :: [Value] -> [(String, Value)] -> IO Value
+builtinTake [VInt n, VLazyList ref] _ = lazyTake n ref >>= mkList
 builtinTake [VInt n, v] _ = toList v >>= mkList . take n
 builtinTake [nv, v] _ = do
   n <- coerceInt noPos "take" nv
-  toList v >>= mkList . take n
+  case v of
+    VLazyList ref -> lazyTake n ref >>= mkList
+    _             -> toList v >>= mkList . take n
 builtinTake _ _ = err "take" 2
 
 builtinDrop :: [Value] -> [(String, Value)] -> IO Value
@@ -293,6 +300,9 @@ builtinDrop [nv, v] _ = do
 builtinDrop _ _ = err "drop" 2
 
 builtinTakeWhile :: [Value] -> [(String, Value)] -> IO Value
+builtinTakeWhile [fn, VLazyList ref] _ = do
+  result <- takeWhileLazy fn ref
+  mkList result
 builtinTakeWhile [fn, v] _ = do
   elems  <- toList v
   result <- takeWhileM (\x -> fmap isTruthy (callFn fn [x])) elems
@@ -304,6 +314,21 @@ takeWhileM _ []     = return []
 takeWhileM p (x:xs) = do
   b <- p x
   if b then fmap (x:) (takeWhileM p xs) else return []
+
+takeWhileLazy :: Value -> IORef LazyList -> IO [Value]
+takeWhileLazy fn ref = do
+  ll <- readIORef ref
+  case ll of
+    LNil -> return []
+    LCons v mkRest -> do
+      keep <- fmap isTruthy (callFn fn [v])
+      if keep
+        then do
+          rest <- mkRest
+          restRef <- newIORef rest
+          vs <- takeWhileLazy fn restRef
+          return (v : vs)
+        else return []
 
 builtinDropWhile :: [Value] -> [(String, Value)] -> IO Value
 builtinDropWhile [fn, v] _ = do
@@ -1279,6 +1304,7 @@ toList (VTuple vs)   = return vs
 toList (VStr s)      = return (map (VStr . (:[])) s)
 toList (VSet ref)    = readIORef ref
 toList (VIterator ref) = readIORef ref
+toList (VLazyList r)   = lazyToList r
 toList v = throwIO (MFTypeError
   { mfMsg = "object is not iterable: " ++ typeNameOf v, mfPos = noPos })
 

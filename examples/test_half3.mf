@@ -1,0 +1,4 @@
+def add1(n) = n + 1
+def times2(n) = n * 2
+let not_even = not . even
+let increment_then_double = times2 . add1
